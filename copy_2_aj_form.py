@@ -1,0 +1,147 @@
+# -*- coding: utf-8 -*-
+
+################################################################################
+## Form generated from reading UI file 'copy_2_aj_form.ui'
+##
+## Created by: Qt User Interface Compiler version 6.7.2
+##
+## WARNING! All changes made in this file will be lost when recompiling UI file!
+################################################################################
+
+from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
+    QMetaObject, QObject, QPoint, QRect,
+    QSize, QTime, QUrl, Qt)
+from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
+    QFont, QFontDatabase, QGradient, QIcon,
+    QImage, QKeySequence, QLinearGradient, QPainter,
+    QPalette, QPixmap, QRadialGradient, QTransform)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QGroupBox, QLabel,
+    QLineEdit, QMainWindow, QMenuBar, QPushButton,
+    QRadioButton, QSizePolicy, QStatusBar, QWidget)
+
+class Ui_MainWindow(object):
+    def setupUi(self, MainWindow):
+        if not MainWindow.objectName():
+            MainWindow.setObjectName(u"MainWindow")
+        MainWindow.resize(800, 551)
+        self.centralwidget = QWidget(MainWindow)
+        self.centralwidget.setObjectName(u"centralwidget")
+        self.label_1 = QLabel(self.centralwidget)
+        self.label_1.setObjectName(u"label_1")
+        self.label_1.setGeometry(QRect(70, 64, 91, 61))
+        font = QFont()
+        font.setPointSize(36)
+        font.setBold(True)
+        self.label_1.setFont(font)
+        self.pushButton = QPushButton(self.centralwidget)
+        self.pushButton.setObjectName(u"pushButton")
+        self.pushButton.setGeometry(QRect(620, 390, 141, 31))
+        self.label_2 = QLabel(self.centralwidget)
+        self.label_2.setObjectName(u"label_2")
+        self.label_2.setGeometry(QRect(70, 150, 81, 16))
+        self.label_3 = QLabel(self.centralwidget)
+        self.label_3.setObjectName(u"label_3")
+        self.label_3.setGeometry(QRect(70, 210, 81, 51))
+        self.label_3.setFont(font)
+        self.label_4 = QLabel(self.centralwidget)
+        self.label_4.setObjectName(u"label_4")
+        self.label_4.setGeometry(QRect(70, 270, 71, 16))
+        self.groupBox = QGroupBox(self.centralwidget)
+        self.groupBox.setObjectName(u"groupBox")
+        self.groupBox.setGeometry(QRect(260, 70, 241, 80))
+        self.radioButton_1 = QRadioButton(self.groupBox)
+        self.radioButton_1.setObjectName(u"radioButton_1")
+        self.radioButton_1.setGeometry(QRect(10, 30, 97, 19))
+        self.radioButton_1.setChecked(True)
+        self.radioButton_2 = QRadioButton(self.groupBox)
+        self.radioButton_2.setObjectName(u"radioButton_2")
+        self.radioButton_2.setGeometry(QRect(110, 30, 97, 19))
+        self.groupBox_2 = QGroupBox(self.centralwidget)
+        self.groupBox_2.setObjectName(u"groupBox_2")
+        self.groupBox_2.setGeometry(QRect(250, 170, 381, 80))
+        self.radioButton_3 = QRadioButton(self.groupBox_2)
+        self.radioButton_3.setObjectName(u"radioButton_3")
+        self.radioButton_3.setGeometry(QRect(20, 20, 97, 19))
+        self.radioButton_4 = QRadioButton(self.groupBox_2)
+        self.radioButton_4.setObjectName(u"radioButton_4")
+        self.radioButton_4.setGeometry(QRect(130, 20, 97, 19))
+        self.radioButton_5 = QRadioButton(self.groupBox_2)
+        self.radioButton_5.setObjectName(u"radioButton_5")
+        self.radioButton_5.setGeometry(QRect(240, 20, 97, 19))
+        self.radioButton_5.setChecked(True)
+        self.lineEdit_1 = QLineEdit(self.groupBox_2)
+        self.lineEdit_1.setObjectName(u"lineEdit_1")
+        self.lineEdit_1.setGeometry(QRect(10, 50, 81, 21))
+        self.lineEdit_2 = QLineEdit(self.groupBox_2)
+        self.lineEdit_2.setObjectName(u"lineEdit_2")
+        self.lineEdit_2.setGeometry(QRect(130, 50, 81, 21))
+        self.groupBox_3 = QGroupBox(self.centralwidget)
+        self.groupBox_3.setObjectName(u"groupBox_3")
+        self.groupBox_3.setGeometry(QRect(160, 310, 491, 80))
+        self.checkBox_1 = QCheckBox(self.groupBox_3)
+        self.checkBox_1.setObjectName(u"checkBox_1")
+        self.checkBox_1.setGeometry(QRect(10, 30, 81, 19))
+        self.checkBox_1.setChecked(True)
+        self.checkBox_2 = QCheckBox(self.groupBox_3)
+        self.checkBox_2.setObjectName(u"checkBox_2")
+        self.checkBox_2.setGeometry(QRect(90, 30, 81, 19))
+        self.checkBox_2.setChecked(True)
+        self.checkBox_3 = QCheckBox(self.groupBox_3)
+        self.checkBox_3.setObjectName(u"checkBox_3")
+        self.checkBox_3.setGeometry(QRect(180, 30, 81, 19))
+        self.checkBox_4 = QCheckBox(self.groupBox_3)
+        self.checkBox_4.setObjectName(u"checkBox_4")
+        self.checkBox_4.setGeometry(QRect(280, 30, 81, 19))
+        self.checkBox_5 = QCheckBox(self.groupBox_3)
+        self.checkBox_5.setObjectName(u"checkBox_5")
+        self.checkBox_5.setGeometry(QRect(380, 30, 81, 19))
+        self.pushButton_2 = QPushButton(self.centralwidget)
+        self.pushButton_2.setObjectName(u"pushButton_2")
+        self.pushButton_2.setGeometry(QRect(620, 420, 141, 31))
+        self.pushButton_3 = QPushButton(self.centralwidget)
+        self.pushButton_3.setObjectName(u"pushButton_3")
+        self.pushButton_3.setGeometry(QRect(620, 450, 141, 31))
+        self.pushButton_4 = QPushButton(self.centralwidget)
+        self.pushButton_4.setObjectName(u"pushButton_4")
+        self.pushButton_4.setGeometry(QRect(530, 410, 75, 41))
+        MainWindow.setCentralWidget(self.centralwidget)
+        self.menubar = QMenuBar(MainWindow)
+        self.menubar.setObjectName(u"menubar")
+        self.menubar.setGeometry(QRect(0, 0, 800, 33))
+        MainWindow.setMenuBar(self.menubar)
+        self.statusbar = QStatusBar(MainWindow)
+        self.statusbar.setObjectName(u"statusbar")
+        MainWindow.setStatusBar(self.statusbar)
+
+        self.retranslateUi(MainWindow)
+
+        QMetaObject.connectSlotsByName(MainWindow)
+    # setupUi
+
+    def retranslateUi(self, MainWindow):
+        MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
+        self.label_1.setText(QCoreApplication.translate("MainWindow", u"38", None))
+        self.pushButton.setText(QCoreApplication.translate("MainWindow", u"Export to clipboard", None))
+        self.label_2.setText(QCoreApplication.translate("MainWindow", u"Albums", None))
+        self.label_3.setText(QCoreApplication.translate("MainWindow", u"3", None))
+        self.label_4.setText(QCoreApplication.translate("MainWindow", u"Actors", None))
+        self.groupBox.setTitle(QCoreApplication.translate("MainWindow", u"Clipboard Mode", None))
+        self.radioButton_1.setText(QCoreApplication.translate("MainWindow", u"Add", None))
+        self.radioButton_2.setText(QCoreApplication.translate("MainWindow", u"Remove", None))
+        self.groupBox_2.setTitle(QCoreApplication.translate("MainWindow", u"Export Option", None))
+        self.radioButton_3.setText(QCoreApplication.translate("MainWindow", u"Album", None))
+        self.radioButton_4.setText(QCoreApplication.translate("MainWindow", u"Actor", None))
+        self.radioButton_5.setText(QCoreApplication.translate("MainWindow", u"Both", None))
+        self.lineEdit_1.setText(QCoreApplication.translate("MainWindow", u"9999", None))
+        self.lineEdit_2.setText(QCoreApplication.translate("MainWindow", u"9999", None))
+        self.groupBox_3.setTitle(QCoreApplication.translate("MainWindow", u"CMD options", None))
+        self.checkBox_1.setText(QCoreApplication.translate("MainWindow", u"-nl", None))
+        self.checkBox_2.setText(QCoreApplication.translate("MainWindow", u"-nc", None))
+        self.checkBox_3.setText(QCoreApplication.translate("MainWindow", u"-fda", None))
+        self.checkBox_4.setText(QCoreApplication.translate("MainWindow", u"-fdm", None))
+        self.checkBox_5.setText(QCoreApplication.translate("MainWindow", u"-fdo", None))
+        self.pushButton_2.setText(QCoreApplication.translate("MainWindow", u"remove-pre", None))
+        self.pushButton_3.setText(QCoreApplication.translate("MainWindow", u"copy-pre", None))
+        self.pushButton_4.setText(QCoreApplication.translate("MainWindow", u"Save", None))
+    # retranslateUi
+
