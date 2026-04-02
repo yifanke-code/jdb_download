@@ -354,6 +354,8 @@ class JdbDownloader(QMainWindow):
             
         if self.current_page > self.page_to:
             self.log('=== Scan Completed ===')
+            self.save_javdb_to_file()
+            save_check_json(self.df_check)
             self.btn_start.setEnabled(True)
             self.is_scanning = False
             return
@@ -613,7 +615,7 @@ class JdbDownloader(QMainWindow):
     def continue_scan(self):
         if self.paused_album:
             self.save_to_check_json(self.paused_album.aid)
-            self.log(f'[CONTINUE] {self.paused_album.aid} - saved to check.json')
+            self.add_album_to_memory(self.paused_album)
         self.log(f'[CONTINUE] {self.paused_album.aid if self.paused_album else ""} - proceeding to next album')
         QTimer.singleShot(300, self.process_album)
         
@@ -626,6 +628,8 @@ class JdbDownloader(QMainWindow):
         self.btn_start.setEnabled(True)
         self.lbl_status.setText('STOPPED - Ready for new scan')
         self.lbl_current_page.setText('Current Page: -')
+        self.save_javdb_to_file()
+        save_check_json(self.df_check)
         self.log('[STOP] Scan stopped by user. Ready for new scan.')
         
     def download_magnet(self):
@@ -664,22 +668,15 @@ class JdbDownloader(QMainWindow):
         save_json_safe(self.df_maglink, MAGLINK_FN)
         self.log('Magnet(s) saved to maglink_added.json')
         
-    def save_album_info(self):
-        if not self.paused_album:
+    def add_album_to_memory(self, album):
+        if not album:
             return
             
-        aid = self.paused_album.aid
-        actors = self.paused_album.actors
+        aid = album.aid
+        actors = album.actors
         
-        if not self.df_javdb.empty:
-            id_list = set(self.df_javdb['ID'].tolist())
-        else:
-            id_list = set()
-            
-        if aid.upper() in id_list:
-            self.log(f'{aid} already in my javdb')
-            return
-            
+        self.df_javdb = self.df_javdb[self.df_javdb['ID'].str.upper() != aid.upper()]
+        
         for alink, actor in actors:
             if len(actors) > 1:
                 av = 'Collection'
@@ -687,15 +684,26 @@ class JdbDownloader(QMainWindow):
                 av = actor
                 
             av_list = [av, '', 0, 0, 0, aid.upper(), actor, 
-                      self.paused_album.img_link, self.paused_album.rate,
-                      self.paused_album.series, self.paused_album.tags,
-                      actors, self.paused_album.release]
+                      album.img_link, album.rate,
+                      album.series, album.tags,
+                      actors, album.release]
             
             new_row = pd.DataFrame([av_list], columns=['AV', 'Album', 'count', 'size', 'path', 'ID', 'Cast', 'album_img_link', 'rate', 'series', 'tags', 'actors', 'release'])
             self.df_javdb = pd.concat([self.df_javdb, new_row], ignore_index=True)
             
+        self.log(f'[ADDED] {aid} to memory (will save when scan completes)')
+        
+    def save_javdb_to_file(self):
         save_json_safe(self.df_javdb, JAVDB_FN)
-        self.log(f'Album {aid} saved to my javdb.json')
+        self.log('[SAVED] my javdb.json saved to disk')
+        
+    def save_album_info(self):
+        if not self.paused_album:
+            return
+            
+        self.add_album_to_memory(self.paused_album)
+        self.save_javdb_to_file()
+        self.log(f'Album {self.paused_album.aid} saved to my javdb.json')
         
     def check_clipboard(self):
         if not self.is_scanning:
