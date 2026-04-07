@@ -18,13 +18,24 @@ from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 from PyQt6.QtWidgets import QFileDialog
 from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
 import aria2p
 
 ARIA2_SERVER = 'http://192.168.50.7'
-MAGLINK_FN = Path('./maglink_added.json')
-JAVDB_FN = Path('./my javdb.json')
-COLLECTION_FN = Path('./my collection.json')
-CHECK_FN = Path('./check.json')
+
+def get_json_path(filename, fallback_dir='c:/github/my_json'):
+    local = Path('./' + filename)
+    fallback = Path(fallback_dir + '/' + filename)
+    if local.exists():
+        return local
+    elif fallback.exists():
+        return fallback
+    return local
+
+MAGLINK_FN = get_json_path('maglink_added.json')
+JAVDB_FN = get_json_path('my javdb.json')
+COLLECTION_FN = get_json_path('my collection.json')
+CHECK_FN = get_json_path('check.json')
 
 def load_check_json():
     if CHECK_FN.is_file():
@@ -107,6 +118,111 @@ class AlbumInfo:
         self.title = title
         self.magnet_links = []
 
+class LocalScanWorker(QThread):
+    log_signal = pyqtSignal(str)
+    album_found_signal = pyqtSignal(object)
+    progress_signal = pyqtSignal(int, int)
+    finished_signal = pyqtSignal(list)
+    
+    def __init__(self, files, page, parent=None):
+        super().__init__(parent)
+        self.files = files
+        self.page = page
+        self.albums = []
+        
+    def run(self):
+        total = len(self.files)
+        for i, f in enumerate(self.files):
+            try:
+                filename = f.name
+                aid = self.extract_id_from_filename(filename)
+                
+                if not aid:
+                    self.log_signal.emit(f'[LOCAL] Cannot extract ID from: {filename}')
+                    self.progress_signal.emit(i + 1, total)
+                    continue
+                    
+                self.log_signal.emit(f'[LOCAL] Searching: {aid}')
+                
+                search_url = f'https://javdb.com/search?q={aid}&f=all'
+                
+                if not safe_goto(self.page, search_url):
+                    self.log_signal.emit(f'[LOCAL] Failed to search: {aid}')
+                    self.progress_signal.emit(i + 1, total)
+                    continue
+                    
+                source = self.page.content()
+                
+                album_links = re.findall(r"<a\s{1}href=\"(/v/[0-9A-Za-z]+)\"", source)
+                
+                if not album_links:
+                    self.log_signal.emit(f'[LOCAL] No album found: {aid}')
+                    self.progress_signal.emit(i + 1, total)
+                    continue
+                    
+                first_album_url = 'https://javdb.com' + album_links[0]
+                self.log_signal.emit(f'[LOCAL] Found album: {first_album_url}')
+                
+                if not safe_goto(self.page, first_album_url):
+                    self.log_signal.emit(f'[LOCAL] Failed to load album: {aid}')
+                    self.progress_signal.emit(i + 1, total)
+                    continue
+                    
+                source = self.page.content()
+                
+                items = re.findall(r"video-detail[\w\W]+?<strong>([^<]+)</strong>[\w\W]+?class=\"current-title\">([^<]+)<", source)
+                item2s = re.findall(r"video-detail[\w\W]+?<strong>([^<]+)</strong>[\w\W]+?class=\"origin-title\">([^<]+)<", source)
+                if item2s:
+                    items = item2s
+                    
+                if not items:
+                    self.log_signal.emit(f'[LOCAL] Cannot parse album: {aid}')
+                    self.progress_signal.emit(i + 1, total)
+                    continue
+                    
+                aid_from_page = items[0][0]
+                title = items[0][1] if len(items[0]) > 1 else ''
+                
+                actors = re.findall(r"<a\s{1}href=\"/actors/([^\"]+)[^>]+>([^<]+)</a><strong\sclass=\"symbol\sfemale\">", source)
+                series = re.findall(r"<a\shref=\"/series[^>]+>([^<]+)", source)
+                tags = re.findall(r"<a\shref=\"/tags[^>]+>([^<]+)", source)
+                rates = re.findall(r"((?<=&nbsp;)[0-9\.]+(?=分))", source)
+                releases = re.findall(r"日期:[\w\W]+?class=\"value\">([^<]+)</span>", source)
+                album_img_links = re.findall(r"class=\"video-meta-panel\"[\w\W]+?<img\ssrc=\"([^\"]+)\"\sclass=\"video-cover\"", source)
+                
+                img_link = album_img_links[0] if album_img_links else ''
+                rate = rates[0] if rates else '0.0'
+                release = releases[0] if releases else ''
+                
+                album = AlbumInfo(first_album_url, aid_from_page, release, True, actors, series, tags, rate, release, img_link, title)
+                self.albums.append(album)
+                self.log_signal.emit(f'[LOCAL] Added: {aid_from_page} - {title} ({len(actors)} actors)')
+                
+            except Exception as e:
+                self.log_signal.emit(f'[LOCAL] Error: {e}')
+            finally:
+                self.progress_signal.emit(i + 1, total)
+                
+        self.finished_signal.emit(self.albums)
+        
+    def extract_id_from_filename(self, filename):
+        filename = filename.upper()
+        filename = re.sub(r'\.(MP4|MKV|AVI|MOV|WMV|FLV|WEBM|M4V|PRORES)$', '', filename)
+        
+        filename = re.sub(r'HHD800\.COM', '', filename)
+        filename = re.sub(r'HHD800', '', filename)
+            
+        patterns = [
+            r'([A-Z]{2,5}[-\s]?\d{3,5})',
+            r'([A-Z]{1,2}\d{2,5})',
+            r'([A-Z]+\d+)',
+        ]
+        for p in patterns:
+            match = re.search(p, filename)
+            if match:
+                return match.group(1).replace(' ', '-')
+        return None
+        
 class JdbDownloader(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -163,9 +279,18 @@ class JdbDownloader(QMainWindow):
         self.t_now = pd.Timestamp.now()
         self.t_h1year = self.t_now - pd.Timedelta(270, 'd')
         
+        self.df_collection = load_json_safe(COLLECTION_FN)
+        
         self._init_ui()
         self._init_browser()
         self._init_clipboard_timer()
+        self._init_page_monitor()
+        
+    def _init_page_monitor(self):
+        self.page_timer = QTimer(self)
+        self.page_timer.timeout.connect(self.check_page_change)
+        self.page_timer.start(1000)
+        self.last_url = ''
         
     def _init_ui(self):
         central = QWidget()
@@ -235,11 +360,21 @@ class JdbDownloader(QMainWindow):
         self.btn_browse.clicked.connect(self.browse_local_folder)
         self.btn_scan_local = QPushButton('Scan Local Files')
         self.btn_scan_local.clicked.connect(self.scan_local_files)
+        self.btn_stop_local = QPushButton('STOP')
+        self.btn_stop_local.setEnabled(False)
+        self.btn_stop_local.clicked.connect(self.stop_local_scan)
+        self.progress_local = QProgressBar()
+        self.progress_local.setVisible(False)
         local_layout.addWidget(QLabel('Path:'))
         local_layout.addWidget(self.line_local_path)
         local_layout.addWidget(self.btn_browse)
         local_layout.addWidget(self.btn_scan_local)
+        local_layout.addWidget(self.btn_stop_local)
         local_group.setLayout(local_layout)
+        
+        self.progress_layout = QHBoxLayout()
+        self.progress_layout.addWidget(self.progress_local)
+        main_layout.addLayout(self.progress_layout)
         
         top_layout.addWidget(page_group)
         top_layout.addWidget(url_group)
@@ -287,7 +422,7 @@ class JdbDownloader(QMainWindow):
         self.btn_continue = QPushButton('Continue to Next')
         self.btn_skip = QPushButton('Skip This Album')
         self.btn_download_mag = QPushButton('Download Magnet')
-        self.btn_save_album = QPushButton('Save Album Info')
+        self.btn_save_album = QPushButton('Save to W:/')
         self.btn_stop = QPushButton('STOP')
         
         self.btn_start.clicked.connect(self.start_scan)
@@ -322,10 +457,21 @@ class JdbDownloader(QMainWindow):
         info_layout.addWidget(self.lbl_status)
         main_layout.addLayout(info_layout)
         
+        self.lbl_album_info = QLabel('')
+        self.lbl_album_info.setStyleSheet("font-weight: bold; color: #0066cc;")
+        main_layout.addWidget(self.lbl_album_info)
+        
         self.table_album = QTableWidget()
-        self.table_album.setColumnCount(5)
-        self.table_album.setHorizontalHeaderLabels(['Magnet Link', 'Date', 'Actor', 'ID', 'Release'])
-        self.table_album.horizontalHeader().setStretchLastSection(True)
+        self.table_album.setColumnCount(6)
+        self.table_album.setHorizontalHeaderLabels(['種子的title', '檔案大小', '高清', '字幕', '破解', '日期'])
+        self.table_album.horizontalHeader().setStretchLastSection(False)
+        self.table_album.setColumnWidth(0, 320)
+        self.table_album.setColumnWidth(1, 70)
+        self.table_album.setColumnWidth(2, 45)
+        self.table_album.setColumnWidth(3, 45)
+        self.table_album.setColumnWidth(4, 45)
+        self.table_album.setColumnWidth(5, 85)
+        self.table_album.cellDoubleClicked.connect(self.on_table_double_click)
         main_layout.addWidget(self.table_album)
         
         self.text_output = QTextEdit()
@@ -463,6 +609,8 @@ class JdbDownloader(QMainWindow):
         
         if not links:
             self.log('No more albums, stopping')
+            self.save_javdb_to_file()
+            save_check_json(self.df_check)
             self.btn_start.setEnabled(True)
             self.is_scanning = False
             return
@@ -491,12 +639,6 @@ class JdbDownloader(QMainWindow):
         force_fda = self.chk_force_download_again.isChecked()
         if not force_fda and aid.upper() in self.check_list:
             self.log(f'[SKIP] {aid} already in collection (-fda not checked)')
-            QTimer.singleShot(300, self.process_album)
-            return
-            
-        nc = self.chk_no_collection.isChecked()
-        if nc and aid.upper() in self.collection_ids:
-            self.log(f'[SKIP] {aid} is Collection album (-nc checked)')
             QTimer.singleShot(300, self.process_album)
             return
             
@@ -563,92 +705,206 @@ class JdbDownloader(QMainWindow):
         self.current_album.title = title
         
         nc = self.chk_no_collection.isChecked()
-        if nc and len(actors) > 1:
-            self.log(f'[SKIP] {aid} has {len(actors)} actors = Collection (-nc checked)')
+        female_count = len(actors)
+        if nc and female_count != 1:
+            self.log(f'[SKIP] {aid} has {female_count} female actors (-nc checked, need exactly 1 to pause)')
             QTimer.singleShot(300, self.process_album)
             return
             
-        mag_links_raw = re.findall(r"<a\shref=\"(magnet:[^\"]+(?=\"\stitle=)).+?((?<=class=\"time\">)[^<]+)", source, flags=re.DOTALL)
+        soup = BeautifulSoup(source, 'html.parser')
+        magnet_items = soup.find_all('div', class_='item')
         
-        fdo = self.chk_force_download_old.isChecked()
-        nm = self.chk_uncensored.isChecked()
-        cc = self.chk_chinese.isChecked()
-        uc = nm or cc
-        
-        valid_mags = []
-        skip_reasons = []
-        
-        for mag_link, mag_date in mag_links_raw:
-            reason = None
+        mag_links_raw = []
+        for item in magnet_items:
+            btn = item.find('button', {'data-clipboard-text': True})
+            name_span = item.find('span', class_='name')
+            meta_span = item.find('span', class_='meta')
+            time_span = item.find('span', class_='time')
             
-            if not fdo:
-                try:
-                    if pd.Timestamp(mag_date) < self.t_h1year:
-                        reason = 'seed too old'
-                except:
-                    pass
-                    
-            if uc and not reason:
-                has_uc = ('-u' in mag_link.lower()) or ('-c' in mag_link.lower())
-                if not has_uc:
-                    reason = '-uc/-c filter not matched'
-                    
-            if mag_link in self.downloaded_maglinks and not self.chk_force_download_mag.isChecked():
-                reason = 'already downloaded (-fdm not checked)'
-                
-            if not reason:
-                valid_mags.append((mag_link, mag_date))
-            else:
-                skip_reasons.append(f'{mag_link[:30]}... reason: {reason}')
-            
-        self.current_album.magnet_links = valid_mags
+            if btn and btn.get('data-clipboard-text'):
+                mag = btn['data-clipboard-text']
+                title = name_span.get_text(strip=True) if name_span else ''
+                meta = meta_span.get_text(strip=True) if meta_span else ''
+                date = time_span.get_text(strip=True) if time_span else ''
+                mag_links_raw.append((mag, title, meta, date))
         
-        if skip_reasons:
-            for sr in skip_reasons[:3]:
-                self.log(f'[MAG SKIP] {sr}')
-                
-        if not valid_mags:
-            self.log(f'[SKIP] {aid}: No valid magnets after filtering')
+        self.current_album.magnet_links = mag_links_raw
+        
+        if not mag_links_raw:
+            self.log(f'[SKIP] {aid}: No magnets found')
             QTimer.singleShot(300, self.process_album)
             return
+        
+        uc_checked = self.chk_uncensored.isChecked()
+        if uc_checked:
+            has_uc_magnet = any(
+                '-u' in m[1].lower() or '-c' in m[1].lower() or '-uc' in m[1].lower()
+                for m in mag_links_raw
+            )
+            if not has_uc_magnet:
+                self.log(f'[SKIP] {aid}: No -u/-c/-uc magnet found (-uc checked)')
+                QTimer.singleShot(300, self.process_album)
+                return
         
         if self.is_recently_checked(aid):
-            self.log(f'[AUTO-SKIP] {aid} was checked within 10 days, skipping pause')
-            QTimer.singleShot(300, self.process_album)
-            return
+            reply = QMessageBox.question(
+                self, 'Warning',
+                f'Album {aid} was checked within 10 days.\nContinue to next?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                QTimer.singleShot(300, self.process_album)
+                return
             
         self.display_album_info()
+        
+        aid = self.current_album.aid
+        if not self.df_javdb.empty:
+            id_list = set(self.df_javdb['ID'].tolist())
+        else:
+            id_list = set()
+        if aid.upper() not in id_list:
+            self.add_album_to_memory(self.current_album)
+            self.log(f'[ADDED] {aid} to memory (scan pause)')
+            
+        self.check_collection_and_open_browser(aid)
+        
         self.log(f'[PAUSE] {self.current_album.aid} - {self.current_page_display} - Reason: magnets found, waiting for decision')
         self.pause_current()
         
+    def parse_magnet_info(self, mag_link):
+        import urllib.parse
+        
+        try:
+            parsed = urllib.parse.urlparse(mag_link)
+            params = urllib.parse.parse_qs(parsed.query)
+            
+            dn = params.get('dn', [''])[0]
+            dn_decoded = urllib.parse.unquote(dn)
+            
+            title = dn_decoded
+            
+            size = ''
+            hd = ''
+            subtitle = ''
+            cracked = ''
+            
+            if '-u' in dn_decoded.lower() or '無碼' in dn_decoded or 'uncensored' in dn_decoded.lower():
+                cracked = '是'
+            
+            if '-c' in dn_decoded.lower() or '中文' in dn_decoded or '字幕' in dn_decoded:
+                subtitle = '是'
+            
+            if '高清' in dn_decoded or '720p' in dn_decoded.lower() or '1080p' in dn_decoded.lower() or '4k' in dn_decoded.lower() or 'hd' in dn_decoded.lower():
+                hd = '是'
+                
+            size_match = re.search(r'\[(\d+\.?\d*\s*[GMgm])\]', dn_decoded)
+            if size_match:
+                size = size_match.group(1)
+            
+            return title, size, hd, subtitle, cracked
+            
+        except:
+            return mag_link[:50], '', '', '', ''
+            
     def display_album_info(self):
         self.table_album.setRowCount(0)
         
-        for mag, date in self.current_album.magnet_links:
+        mag_data = []
+        for item in self.current_album.magnet_links:
+            if len(item) >= 4:
+                mag, title, meta, date = item[:4]
+                tag = ''
+            elif len(item) >= 3:
+                mag, title, meta = item[:3]
+                tag = ''
+                date = ''
+            else:
+                continue
+            
+            size = meta.split(',')[0].strip() if meta else ''
+            
+            hd = '高清' if 'hd' in title.lower() else ''
+            subtitle = '字幕' if '-c' in title.lower() or '字幕' in title else ''
+            cracked = '破解' if '-u' in title.lower() or '無碼' in title or 'uncensored' in title.lower() else ''
+            
+            mag_data.append({
+                'mag': mag, 'date': date, 'title': title, 
+                'size': size, 'hd': hd, 'subtitle': subtitle, 'cracked': cracked
+            })
+        
+        def parse_size(s):
+            if not s:
+                return 0
+            s = s.upper().strip()
+            if 'G' in s:
+                try:
+                    return float(re.sub(r'[^\d.]', '', s)) * 1024
+                except:
+                    return 0
+            elif 'M' in s:
+                try:
+                    return float(re.sub(r'[^\d.]', '', s))
+                except:
+                    return 0
+            return 0
+        
+        def sort_key(x):
+            cracked_val = 1 if x['cracked'] == '破解' else 0
+            subtitle_val = 1 if x['subtitle'] == '字幕' else 0
+            hd_val = 1 if x['hd'] == '高清' else 0
+            size_val = parse_size(x['size'])
+            return (-cracked_val, -subtitle_val, -hd_val, -size_val, x['date'])
+            
+        mag_data.sort(key=sort_key)
+        
+        self.magnet_list = []
+        
+        for md in mag_data:
             row = self.table_album.rowCount()
             self.table_album.insertRow(row)
-            self.table_album.setItem(row, 0, QTableWidgetItem(mag[:60] + '...'))
-            self.table_album.setItem(row, 1, QTableWidgetItem(date))
             
+            self.table_album.setItem(row, 0, QTableWidgetItem(md['title'][:50]))
+            self.table_album.setItem(row, 1, QTableWidgetItem(md['size']))
+            self.table_album.setItem(row, 2, QTableWidgetItem(md['hd']))
+            self.table_album.setItem(row, 3, QTableWidgetItem(md['subtitle']))
+            self.table_album.setItem(row, 4, QTableWidgetItem(md['cracked']))
+            self.table_album.setItem(row, 5, QTableWidgetItem(md['date']))
+            
+            self.magnet_list.append(md['mag'])
+            
+        actors_str = ''
+        if self.current_album.actors:
             if len(self.current_album.actors) > 1:
-                actor = 'Collection'
-            elif self.current_album.actors:
-                actor = self.current_album.actors[0][1]
+                actors_str = 'Collection (' + str(len(self.current_album.actors)) + '人)'
             else:
-                actor = ''
-            self.table_album.setItem(row, 2, QTableWidgetItem(actor))
-            self.table_album.setItem(row, 3, QTableWidgetItem(self.current_album.aid))
-            self.table_album.setItem(row, 4, QTableWidgetItem(self.current_album.release_date))
-            
-        info = f"ID: {self.current_album.aid} | Release: {self.current_album.release_date} | Rate: {self.current_album.rate}"
+                actors_str = self.current_album.actors[0][1]
+        
+        album_info_text = f"Actors: {actors_str} | Title: {self.current_album.title[:30] if self.current_album.title else ''} | Release: {self.current_album.release_date}"
+        self.lbl_album_info.setText(album_info_text)
+        
+        info = f"ID: {self.current_album.aid} | Rate: {self.current_album.rate}"
         if self.current_album.series:
             info += f" | Series: {self.current_album.series[0]}"
-        if self.current_album.actors:
-            actors_str = ', '.join([a[1] for a in self.current_album.actors])
-            info += f" | Actors: {actors_str}"
             
         self.lbl_info.setText(f'{self.current_page_display} | {info}')
-        self.log(f'[TABLE] {len(self.current_album.magnet_links)} magnets for {self.current_album.aid}')
+        self.log(f'[TABLE] {len(mag_data)} magnets for {self.current_album.aid}')
+        
+    def on_table_double_click(self, row, col):
+        if row < len(self.magnet_list):
+            mag = self.magnet_list[row]
+            pyperclip.copy(mag)
+            self.log(f'[COPY] Magnet copied to clipboard: {mag[:50]}...')
+            
+            dest = self.combo_dest.currentText()
+            if dest == 'aria2' and self.aria2:
+                try:
+                    ks = self.aria2.get_global_options()
+                    download = self.aria2.add_magnet(mag, options=ks)
+                    self.log(f'[DL] Added to aria2: {download.gid}')
+                except Exception as e:
+                    self.log(f'[DL] aria2 error: {e}')
         
     def pause_current(self):
         self.paused_album = self.current_album
@@ -767,13 +1023,31 @@ class JdbDownloader(QMainWindow):
         
         if not already_exists:
             self.add_album_to_memory(AlbumInfo(link, aid, '', True, actors, series, tags, rate, release, img_link, title))
-            self.save_javdb_to_file()
-            self.log(f'[ADDED] {aid} to my javdb.json (saved)')
+            self.log(f'[ADDED] {aid} to my javdb.json (memory only)')
         else:
             self.log(f'[EXISTS] {aid} already in my javdb.json')
             
+        self.check_collection_and_open_browser(aid)
+            
         self.current_album = AlbumInfo(link, aid, release, True, actors, series, tags, rate, release, img_link, title)
-        mag_links_raw = re.findall(r"<a\shref=\"(magnet:[^\"]+(?=\"\stitle=)).+?((?<=class=\"time\">)[^<]+)", source, flags=re.DOTALL)
+        
+        soup = BeautifulSoup(source, 'html.parser')
+        magnet_items = soup.find_all('div', class_='item')
+        
+        mag_links_raw = []
+        for item in magnet_items:
+            btn = item.find('button', {'data-clipboard-text': True})
+            name_span = item.find('span', class_='name')
+            meta_span = item.find('span', class_='meta')
+            time_span = item.find('span', class_='time')
+            
+            if btn and btn.get('data-clipboard-text'):
+                mag = btn['data-clipboard-text']
+                title = name_span.get_text(strip=True) if name_span else ''
+                meta = meta_span.get_text(strip=True) if meta_span else ''
+                date = time_span.get_text(strip=True) if time_span else ''
+                mag_links_raw.append((mag, title, meta, date))
+        
         self.current_album.magnet_links = mag_links_raw
         self.paused_album = self.current_album
         
@@ -781,6 +1055,65 @@ class JdbDownloader(QMainWindow):
         self.lbl_status.setText(f'Album: {aid}')
         
         self.check_clipboard_and_download()
+        
+    def convert_linux_to_windows_path(self, linux_path):
+        if not linux_path:
+            return None
+            
+        mapping = {
+            '/volume1/aria2': 'w:/',
+            '/volume2/Media_on': 'g:/',
+            '/volume1/home/admin/18': 'p:/18',
+            '/volume1/home/admin/Media': 'j:/',
+        }
+        
+        for linux_prefix, win_prefix in mapping.items():
+            if linux_path.startswith(linux_prefix):
+                result = linux_path.replace(linux_prefix, win_prefix)
+                result = result.replace('//', '/')
+                return result
+                
+        return linux_path
+        
+    def check_collection_and_open_browser(self, aid):
+        if self.df_collection.empty or 'ID' not in self.df_collection.columns:
+            self.log(f'[COLLECTION] df_collection is empty or has no ID column')
+            return
+            
+        aid_upper = aid.upper()
+        collection_row = self.df_collection[self.df_collection['ID'].str.upper() == aid_upper]
+        
+        if collection_row.empty:
+            self.log(f'[COLLECTION] {aid} not found in collection')
+            return
+        
+        try:
+            path_val = collection_row['path'].iloc[0] if 'path' in collection_row.columns else None
+        except:
+            path_val = None
+        
+        if not path_val:
+            self.log(f'[COLLECTION] {aid} found but no path field')
+            return
+        
+        win_path = self.convert_linux_to_windows_path(path_val)
+        self.log(f'[COLLECTION] Win path: {win_path}')
+        
+        import subprocess
+        import os
+        try:
+            if os.path.exists(win_path):
+                subprocess.Popen(f'explorer /select,"{win_path}"')
+                self.log(f'[COLLECTION] Opened folder: {win_path}')
+            else:
+                folder = os.path.dirname(win_path)
+                if os.path.exists(folder):
+                    subprocess.Popen(f'explorer "{folder}"')
+                    self.log(f'[COLLECTION] Opened folder (file not found): {folder}')
+                else:
+                    self.log(f'[COLLECTION] Path does not exist: {folder}')
+        except Exception as e:
+            self.log(f'[COLLECTION] Failed to open: {e}')
         
     def check_clipboard_and_download(self):
         dest = self.combo_dest.currentText()
@@ -833,6 +1166,10 @@ class JdbDownloader(QMainWindow):
     def extract_id_from_filename(self, filename):
         filename = filename.upper()
         filename = re.sub(r'\.(MP4|MKV|AVI|MOV|WMV|FLV|WEBM|M4V|PRORES)$', '', filename)
+        
+        filename = re.sub(r'HHD800\.COM', '', filename)
+        filename = re.sub(r'HHD800', '', filename)
+            
         patterns = [
             r'([A-Z]{2,5}[-\s]?\d{3,5})',
             r'([A-Z]{1,2}\d{2,5})',
@@ -863,87 +1200,45 @@ class JdbDownloader(QMainWindow):
             
         self.log(f'[LOCAL] Found {len(files)} video files (including subfolders)')
         
-        base_url = 'https://javdb.com/search'
+        self.btn_scan_local.setEnabled(False)
+        self.btn_stop_local.setEnabled(True)
+        self.progress_local.setVisible(True)
+        self.progress_local.setMaximum(len(files))
+        self.progress_local.setValue(0)
         
-        local_albums = []
+        self.local_worker = LocalScanWorker(files, self.page)
+        self.local_worker.log_signal.connect(self.log)
+        self.local_worker.progress_signal.connect(self.on_local_progress)
+        self.local_worker.finished_signal.connect(self.on_local_finished)
+        self.local_worker.start()
         
-        for f in files:
-            filename = f.name
-            aid = self.extract_id_from_filename(filename)
+    def stop_local_scan(self):
+        if hasattr(self, 'local_worker') and self.local_worker.isRunning():
+            self.local_worker.terminate()
+            self.log('[LOCAL] Scan stopped by user')
+            self.btn_scan_local.setEnabled(True)
+            self.btn_stop_local.setEnabled(False)
+            self.progress_local.setVisible(False)
             
-            if not aid:
-                self.log(f'[LOCAL] Cannot extract ID from: {filename}')
-                continue
-                
-            self.log(f'[LOCAL] Searching: {aid}')
-            
-            search_url = f'{base_url}?q={aid}&f=all'
-            
-            try:
-                if not safe_goto(self.page, search_url):
-                    self.log(f'[LOCAL] Failed to search: {aid}')
-                    continue
-                source = self.page.content()
-            except Exception as e:
-                self.log(f'[LOCAL] Error searching {aid}: {e}')
-                continue
-                
-            album_links = re.findall(r"<a\s{1}href=\"(/v/[0-9A-Za-z]+)\"", source)
-            
-            if not album_links:
-                self.log(f'[LOCAL] No album found: {aid}')
-                continue
-                
-            first_album_url = 'https://javdb.com' + album_links[0]
-            self.log(f'[LOCAL] Found album: {first_album_url}')
-            
-            try:
-                if not safe_goto(self.page, first_album_url):
-                    self.log(f'[LOCAL] Failed to load album: {aid}')
-                    continue
-                source = self.page.content()
-            except Exception as e:
-                self.log(f'[LOCAL] Error loading album {aid}: {e}')
-                continue
-                
-            items = re.findall(r"video-detail[\w\W]+?<strong>([^<]+)</strong>[\w\W]+?class=\"current-title\">([^<]+)<", source)
-            item2s = re.findall(r"video-detail[\w\W]+?<strong>([^<]+)</strong>[\w\W]+?class=\"origin-title\">([^<]+)<", source)
-            if item2s:
-                items = item2s
-                
-            if not items:
-                self.log(f'[LOCAL] Cannot parse album: {aid}')
-                continue
-                
-            aid_from_page = items[0][0]
-            title = items[0][1] if len(items[0]) > 1 else ''
-            
-            actors = re.findall(r"<a\s{1}href=\"/actors/([^\"]+)[^>]+>([^<]+)</a><strong\sclass=\"symbol\sfemale\">", source)
-            series = re.findall(r"<a\shref=\"/series[^>]+>([^<]+)", source)
-            tags = re.findall(r"<a\shref=\"/tags[^>]+>([^<]+)", source)
-            rates = re.findall(r"((?<=&nbsp;)[0-9\.]+(?=分))", source)
-            releases = re.findall(r"日期:[\w\W]+?class=\"value\">([^<]+)</span>", source)
-            album_img_links = re.findall(r"class=\"video-meta-panel\"[\w\W]+?<img\ssrc=\"([^\"]+)\"\sclass=\"video-cover\"", source)
-            
-            img_link = album_img_links[0] if album_img_links else ''
-            rate = rates[0] if rates else '0.0'
-            release = releases[0] if releases else ''
-            
-            album = AlbumInfo(first_album_url, aid_from_page, release, True, actors, series, tags, rate, release, img_link, title)
-            local_albums.append(album)
-            self.log(f'[LOCAL] Added: {aid_from_page} - {title} ({len(actors)} actors)')
-            
-        if not local_albums:
+    def on_local_progress(self, current, total):
+        self.progress_local.setValue(current)
+        
+    def on_local_finished(self, albums):
+        self.btn_scan_local.setEnabled(True)
+        self.btn_stop_local.setEnabled(False)
+        self.progress_local.setVisible(False)
+        
+        if not albums:
             self.log('[LOCAL] No albums found')
             return
             
-        self.log(f'[LOCAL] Total: {len(local_albums)} albums, saving to my javdb.json...')
+        self.log(f'[LOCAL] Total: {len(albums)} albums, saving to my javdb.json...')
         
-        for album in local_albums:
+        for album in albums:
             self.add_album_to_memory(album)
             
         self.save_javdb_to_file()
-        self.log(f'[LOCAL] DONE! {len(local_albums)} albums saved to my javdb.json')
+        self.log(f'[LOCAL] DONE! {len(albums)} albums saved to my javdb.json')
             
     def download_magnet(self):
         if not self.paused_album:
@@ -990,16 +1285,21 @@ class JdbDownloader(QMainWindow):
         
         self.df_javdb = self.df_javdb[self.df_javdb['ID'].str.upper() != aid.upper()]
         
+        def strip_list(lst):
+            if isinstance(lst, list):
+                return [str(x).strip() if x else '' for x in lst]
+            return lst
+            
         for alink, actor in actors:
             if len(actors) > 1:
                 av = 'Collection'
             else:
-                av = actor
+                av = str(actor).strip() if actor else ''
                 
-            av_list = [av, album.title if album.title else '', 0, 0, 0, aid.upper(), actor, 
-                      album.img_link, album.rate,
-                      album.series, album.tags,
-                      actors, album.release]
+            av_list = [av.strip() if av else '', album.title.strip() if album.title else '', 0, 0, 0, aid.upper().strip(), actor[1].strip() if actor else '', 
+                      album.img_link.strip() if album.img_link else '', album.rate.strip() if album.rate else '',
+                      [s.strip() for s in album.series] if album.series else [], [t.strip() for t in album.tags] if album.tags else [],
+                      actors, album.release.strip() if album.release else '']
             
             new_row = pd.DataFrame([av_list], columns=['AV', 'Album', 'count', 'size', 'path', 'ID', 'Cast', 'album_img_link', 'rate', 'series', 'tags', 'actors', 'release'])
             self.df_javdb = pd.concat([self.df_javdb, new_row], ignore_index=True)
@@ -1011,12 +1311,109 @@ class JdbDownloader(QMainWindow):
         self.log('[SAVED] my javdb.json saved to disk')
         
     def save_album_info(self):
-        if not self.paused_album:
+        self.save_javdb_to_file()
+        
+        import shutil
+        
+        src = JAVDB_FN
+        dst = Path('w:/my javdb.json')
+        
+        if not src.exists():
+            self.log('[ERROR] my javdb.json not found')
             return
             
-        self.add_album_to_memory(self.paused_album)
-        self.save_javdb_to_file()
-        self.log(f'Album {self.paused_album.aid} saved to my javdb.json')
+        try:
+            shutil.copy2(src, dst)
+            self.log(f'[COPIED] my javdb.json -> w:/my javdb.json')
+        except Exception as e:
+            self.log(f'[ERROR] Failed to copy: {e}')
+        
+    def check_page_change(self):
+        try:
+            if not self.browser:
+                return
+                
+            ctx = self.browser.contexts[0] if self.browser.contexts else None
+            if not ctx or not ctx.pages:
+                return
+                
+            self.page = ctx.pages[0]
+            
+            if not self.page:
+                return
+            
+            current_url = self.page.url
+            if not current_url:
+                return
+                
+            url_str = str(current_url)
+            
+            if url_str == self.last_url:
+                return
+                
+            self.last_url = url_str
+            
+            if '/v/' not in url_str or 'hhd800.com' in url_str:
+                self.log(f'[PAGE] Non-album URL: {url_str}')
+                return
+            
+            self.log(f'[PAGE] Album page detected: {url_str}')
+            
+            try:
+                source = self.page.content()
+            except Exception as e:
+                self.log(f'[PAGE] Failed to get content: {e}')
+                return
+                
+            items = re.findall(r"video-detail[\w\W]+?<strong>([^<]+)</strong>[\w\W]+?class=\"current-title\">([^<]+)<", source)
+            item2s = re.findall(r"video-detail[\w\W]+?<strong>([^<]+)</strong>[\w\W]+?class=\"origin-title\">([^<]+)<", source)
+            if item2s:
+                items = item2s
+                
+            actors = re.findall(r"<a\s{1}href=\"/actors/([^\"]+)[^>]+>([^<]+)</a><strong\sclass=\"symbol\sfemale\">", source)
+            series = re.findall(r"<a\shref=\"/series[^>]+>([^<]+)", source)
+            tags = re.findall(r"<a\shref=\"/tags[^>]+>([^<]+)", source)
+            rates = re.findall(r"((?<=&nbsp;)[0-9\.]+(?=分))", source)
+            releases = re.findall(r"日期:[\w\W]+?class=\"value\">([^<]+)</span>", source)
+            album_img_links = re.findall(r"class=\"video-meta-panel\"[\w\W]+?<img\ssrc=\"([^\"]+)\"\sclass=\"video-cover\"", source)
+            
+            img_link = album_img_links[0] if album_img_links else ''
+            rate = rates[0] if rates else '0.0'
+            release = releases[0] if releases else ''
+            title = items[0][1] if items and len(items[0]) > 1 else ''
+            
+            if not items:
+                self.log('[PAGE] No items found in page')
+                return
+                
+            aid = items[0][0]
+            
+            soup = BeautifulSoup(source, 'html.parser')
+            magnet_items = soup.find_all('div', class_='item')
+            
+            mag_links_raw = []
+            for item in magnet_items:
+                btn = item.find('button', {'data-clipboard-text': True})
+                name_span = item.find('span', class_='name')
+                meta_span = item.find('span', class_='meta')
+                time_span = item.find('span', class_='time')
+                
+                if btn and btn.get('data-clipboard-text'):
+                    mag = btn['data-clipboard-text']
+                    title = name_span.get_text(strip=True) if name_span else ''
+                    meta = meta_span.get_text(strip=True) if meta_span else ''
+                    date = time_span.get_text(strip=True) if time_span else ''
+                    mag_links_raw.append((mag, title, meta, date))
+            
+            self.current_album = AlbumInfo(url_str, aid, release, True, actors, series, tags, rate, release, img_link, title)
+            self.current_album.magnet_links = mag_links_raw
+            self.paused_album = self.current_album
+            
+            self.display_album_info()
+            self.log(f'[PAGE] Updated table with {len(mag_links_raw)} magnets for {aid}')
+            
+        except Exception as e:
+            self.log(f'[PAGE] Error: {e}')
         
     def check_clipboard(self):
         if not self.is_scanning:
@@ -1052,6 +1449,16 @@ class JdbDownloader(QMainWindow):
                 continue
                 
             self.log(f'[Clipboard] Adding magnet: {mag_clean[:40]}...')
+            
+            if self.current_album and self.current_album.aid:
+                aid = self.current_album.aid
+                if not self.df_javdb.empty:
+                    id_list = set(self.df_javdb['ID'].tolist())
+                else:
+                    id_list = set()
+                if aid.upper() not in id_list:
+                    self.add_album_to_memory(self.current_album)
+                    self.log(f'[Clipboard] Album {aid} added to memory')
             
             if self.aria2:
                 try:
