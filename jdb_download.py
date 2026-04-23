@@ -33,7 +33,7 @@ from PyQt6.QtGui import QFont, QColor, QTextCursor
 
 ARIA2_SERVER = 'http://192.168.50.7'
 PIKPAK_TOKEN = ''  # paste encoded_token from get_pikpak_token.py
-PIKPAK_TOKEN = 'eyJhY2Nlc3NfdG9rZW4iOiAiZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNklqRTNOakl5TmpjNExUQTBaR0V0TkRRMVlTMDVZbVkyTFdFNFpqSTJZV1ZpWXpObE9DSjkuZXlKcGMzTWlPaUpvZEhSd2N6b3ZMM1Z6WlhJdWJYbHdhV3R3WVdzdVkyOXRJaXdpYzNWaUlqb2lZVmRqT0ZONGVVNHlZVlpvUVhabWFDSXNJbUYxWkNJNklsbE9lRlE1ZHpkSFRXUlhka1ZQUzJFaUxDSmxlSEFpT2pFM056WTBNVEV3TURZc0ltbGhkQ0k2TVRjM05qUXdNemd3Tml3aVlYUmZhR0Z6YUNJNkluSXVPVlowVkVkZlVDMVRjakk1TFZaamIzaENjMTltUVNJc0luTmpiM0JsSWpvaWRYTmxjaUJ3WVc0Z2MzbHVZeUJ2Wm1ac2FXNWxJaXdpY0hKdmFtVmpkRjlwWkNJNklqSjNhM00xTm1Nek1XUmpPREJ6ZUcwMWNEa2lMQ0p0WlhSaElqcDdJbUVpT2lJcmNVeEVOR0p6TTBWVkwwOVdXVEl3YXpoclF5OWFRalUzYlVWMlZYQldWR3hKVjFOdE5XdFNiMVV3UFNKOWZRLlgwczlfQ0VwbEFIbUJyQnRoTEY5QVhGMDRuUDVXRVg1bFRsdFl2YURwQngzX0s1LWFxc3NfaFh1dWx3dkNFV0d2aWJvUW5sT0RmajhjN3ZFRXA4RTdnTlBDb0tjYmpwUVVBbWJzM2gydUpUdERLRkxMQ3BGNHB4UV9SSWdTU28zYUI0b2RmZlFCci1MYjRWYVJDQnZpMFRkOHc5Sk05cnlvUXp0T0o0MGNFQUNEaWd3QlRUaHlSSmZvVEVMMWUtbU5JU25vb192WDVBTk5xNlhkdWV5WF93ekhRemN5OUNjYTY5dG1aZTZZblBnaW9VODVwVGVDZW5OMk13Z1hpNzhndUVSc1k4OXVsYjktTUN3cl9TZ3BYRWNRa1NwVXh5TkdGak02Q2psU3BuNlE1NzlFTGNWbGNpMDA2dmlLOXA0QjRVMzAwTzdIbFFqRmRvcjVEb3IzQSIsICJyZWZyZXNoX3Rva2VuIjogIm9zLkExTFdBVy1MazJuaHhWNEQ1QWhJeTJ0N2tndHNjTWpubGdpdWdLVkdWanl5eS1yUEZwdTZsZEIwV05ibCJ9'  # 貼上你的 encoded token
+PIKPAK_TOKEN = 'eyJhY2Nlc3NfdG9rZW4iOiAiZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNklqRTNOakl5TmpjNExUQTBaR0V0TkRRMVlTMDVZbVkyTFdFNFpqSTJZV1ZpWXpObE9DSjkuZXlKcGMzTWlPaUpvZEhSd2N6b3ZMM1Z6WlhJdWJYbHdhV3R3WVdzdVkyOXRJaXdpYzNWaUlqb2lZVmRqT0ZONGVVNHlZVlpvUVhabWFDSXNJbUYxWkNJNklsbE9lRlE1ZHpkSFRXUlhka1ZQUzJFaUxDSmxlSEFpT2pFM056WTJOVGs0TVRrc0ltbGhkQ0k2TVRjM05qWTFNall4T1N3aVlYUmZhR0Z6YUNJNkluSXVRa2d0TlZkUVNrdFRSVFpJZDBWck4wTmtaVEZuVVNJc0luTmpiM0JsSWpvaWRYTmxjaUJ3WVc0Z2MzbHVZeUJ2Wm1ac2FXNWxJaXdpY0hKdmFtVmpkRjlwWkNJNklqSjNhM00xTm1Nek1XUmpPREJ6ZUcwMWNEa2lMQ0p0WlhSaElqcDdJbUVpT2lKTVMxTkJUMFYwYzJsRWNUZGliMFZXTVdFeFFUaG5SSFl6YkdKTE1HTnhNbVJpUlVKcE5IaEljVlpGUFNKOWZRLmV2VGhFcktKeWVhYnJkd29odC1ZN3BSUThCajBNZTRfT2RUcklKNjEtSDBEUjdDZDdIbzdvT1VxQ2pzd1QzZ05kdjRHY0RMZnI1d2pkTHM0NFFTMUVMQTVCMjBqTEROd0g1NC02d3JoT3JuZGJvOVdETTRxV2Z4b2tydjVTVHFJTWNLX0FSQmJsNjFOWmFVYlRHcXlVMjFCVTlwUC1jMXFXOFFBQWJNOVZ2U2ktV0hxOVNVdVZCZkdPV2dqQmJxVW5zZkpVOWxwcE9hVWxWLWFNOWlybmVQWTNlTkUyT3M0ZHU3cGdfV3VxT1RRdXgwSjRQbkxsZV81UjRoaGREYmkzaDc3ekV5RldLYXJLbDY5VXFfZXNVOFN4TlQ3aWhWTW5YTEFDbFhRemhGbHpFaG1MeExjRzNBSFMwVUJXdGl5eGN3OXo3U0xjRXJkaGZBZFRVdTRTUSIsICJyZWZyZXNoX3Rva2VuIjogIm9zLjVYdlB5SFFkdW1ubGtVc0QwQlpVYi1lZjVJRExrNjZVRVVnSWtnTThhN0ZTeThGR2JBR25zcFlMMXAxWSJ9'  # 貼上你的 encoded token
 DELAYS = [10, 1, 3, 7, 2, 0.2, 18, 3, 6, 15, 5, 0.5, 0.1, 1, 6, 4, 2, 8, 12]
 VIDEO_EXTS = frozenset({'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v'})
 VIDEO_EXT_RE = re.compile(r'\.(MP4|MKV|AVI|MOV|WMV|FLV|WEBM|M4V|PRORES)$')
@@ -980,6 +980,24 @@ class JdbDownloader(QMainWindow):
                     return
             except Exception as e:
                 self.log(f'Error loading album: {e}')
+                return
+        else:
+            self.log('No album link, trying to find on current page')
+            try:
+                ctx = self.browser.contexts[0] if self.browser and self.browser.contexts else None
+                if ctx and ctx.pages:
+                    self.page = ctx.pages[0]
+                    links = self.page.query_selector_all('a[href*="/v/"]')
+                    if links:
+                        href = links[0].get_attribute('href')
+                        self.log(f'Found link, clicking: {href}')
+                        links[0].click()
+                        self.page.wait_for_timeout(1000)
+                    else:
+                        self.log('No album link found')
+                        return
+            except Exception as e:
+                self.log(f'Error: {e}')
                 return
 
         source = ''

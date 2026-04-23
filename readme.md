@@ -1,32 +1,118 @@
-分析之前寫的程式
-	./find_javdb_legend.py
-	./copy_2_aj_ui.py
-	./copy_2_aj_form.py
+# JAV DB Downloader
 
-database:
-	./my javdb.json : 所有影片的資料庫，不見得在庫
-	./my collection.json : 已在庫的片單，及檔案path
-	./maglink_added.json : 已在aria2下載過的magnet link
-輸出新版的程式
-	./jdb_download.py
+A PyQt6 desktop application for browsing JavDB.com and downloading videos via magnet links.
 
-將程式功能合併
-1. 到https://javdb.com去搜尋新出的magnet links
-   做成pyQT6 UI介面，參數跟原來的find_javdb_legend.py一樣，但改用UI輸入
-page view
-   1.1 由-il所指定的page開始、（沒指定就從default page https://javdb.com/censored 開始）每個page的每個album 進行暫停檢查，按了continue的button才繼續找下一個album
-		ui 中也可以選擇，所有頁都要檢查、或是只檢查某一頁、或是可輸入一個範圍 （如3-5頁）
-album view
-   1.2 check 上市日期(在page view就有資訊，不用進到album view中來看） 決定是否是濾掉新片只看老片  或是不管新舊都要檢查 (-nl)
-   1.3 album中的actors，是否是多位女性，是的話屬於Collection類， -nc則濾掉Collection，不檢查，否則就停下來檢查
-   1.4 magnet中有沒有-c 中文片，或-u 的片子，或-uc, 二個情況擇一即可、就暫停進行檢查，並顯示album等待進一步決定
-   1.5 或是check my collection.json看是否已有片子在庫了？在庫就略過、或是 -fda => 雖然在庫仍要再檢查下載一次
+## 功能 Features
 
+- **網頁瀏覽**: 透過 Chrome DevTools Protocol (CDP) 連線至已開啟的瀏覽器
+- **專輯掃描**: 自動瀏覽分頁並檢視每個專輯的 magnet 連結
+- **多條件過濾**:
+  - `-nl` 新片/老片過濾
+  - `-nc` 單人/合集過濾  
+  - `-fda` 強制重新下載
+  - `-uc` 含中文字幕 (-c) 或無碼 (-u/-uc) 過濾
+  - `-4k` 4K 影片過濾
+- **下載方式**: 支援 aria2 和 PikPak 兩種下載方式
+- **剪貼簿監控**: 自動偵測剪貼簿中的 magnet 連結並下載
+- **本地檔案掃描**: 掃描本機影片資料夾，自動比對 JavDB 資料庫
+- **資料庫管理**: 將專輯資料儲存至 JSON 檔案
 
-2. 當chrome在某一個album暫停，等待選擇magnet link時，如果有magnet link被copy到clipboard中
-3. 檢查這個clipboard是
-	3.1 pure magnet links
-		check maglink_added.json 已下載過了不再下載，或是option=-fdm 仍要再次進aria2 server下載
-		將它加入aria2的 download list,進行下載，並加到maglink_added.json中
-    3.2 某一個album 的web link
-		分析album的資料，將它加入my javdb.json存檔、資料格式與來源可參考原來的find_javdb_legend.py程式
+## 環境需求 Requirements
+
+- Python 3.11+
+- Windows OS
+- Chrome 瀏覽器 (需開啟遠端除錯連接埠 `chrome --remote-debugging-port=9222`)
+- 已安裝的 Python 套件:
+  - pandas
+  - pyperclip
+  - beautifulsoup4
+  - playwright
+  - aria2p
+  - pikpakapi
+  - PyQt6
+
+## 安裝 Installation
+
+```bash
+pip install pandas pyperclip beautifulsoup4 playwright aria2p pikpakapi PyQt6
+playwright install chromium
+```
+
+## 使用方法 Usage
+
+### 1. 啟動 Chrome 瀏覽器
+
+```bash
+chrome --remote-debugging-port=9222
+```
+
+### 2. 啟動程式
+
+```bash
+python jdb_download.py
+```
+
+### 3. 操作說明
+
+#### 頁面範圍設定
+- **All Pages**: 掃描所有頁面
+- **Single Page**: 只掃描單一頁面
+- **Page Range**: 輸入範圍 (如 3-5 頁)
+
+#### 搜尋類型
+- `censored`: 有碼片
+- `uncensored`: 無碼片
+- `search`: 關鍵字搜尋
+- `actor`: 演員搜尋
+
+#### 過濾選項
+- `-nl 新瓶舊酒/全部`: 是否只檢視舊片 (270 天前)
+- `-nc 單人/含合集`: 是否跳過多位演員的合集
+- `-fda 重下載/未下載`: 已下載過的是否仍要處理
+- `-uc 只停在-u/-c/-uc`: 是否只停在有中文字幕或無碼的影片
+- `-4k 只停在-4k`: 是否只停在 4K 影片
+
+#### 控制按鈕
+- **Continue to Next**: 繼續處理下一個專輯
+- **Skip This Album**: 跳過目前專輯
+- **Save to W:/**: 儲存資料至網路磁碟
+- **STOP**: 停止掃描
+
+### 4. 下載專輯
+
+在專輯檢視畫面中:
+1. 表格會顯示所有可用的 magnet 連結
+2. 雙擊任一列即可開始下載
+3. 選擇下載方式: aria2 或 pikpak
+4. 亦可複製 magnet 連結至剪貼簿，程式會自動偵測並下載
+
+## 資料檔案 Data Files
+
+| 檔案 | 說明 |
+|------|------|
+| `my javdb.json` | 所有影片資料庫 |
+| `my collection.json` | 已在庫的片單及檔案路徑 |
+| `maglink_added.json` | 已在 aria2 下載過的 magnet 連結 |
+| `check.json` | 最近檢查過的專輯記錄 |
+
+## 配置 Configuration
+
+在 `jdb_download.py` 中可調整以下設定:
+
+```python
+ARIA2_SERVER = 'http://192.168.50.7'  # aria2 伺服器位址
+PIKPAK_TOKEN = '...'                   # PikPak 授權碼
+PATH_MAP = {...}                       # Linux 對應 Windows 路徑
+```
+
+## 資料流程 Data Flow
+
+```
+JavDB.com ─→ Playwright ─→ PyQt6 UI ─→ 用戶決策 ─→ aria2/PikPak 下載
+                        │
+                        └─→ JSON 資料庫儲存
+```
+
+## 授權 License
+
+僅供個人學習使用，請尊重智慧財產權。
