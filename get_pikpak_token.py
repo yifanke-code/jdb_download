@@ -46,7 +46,15 @@ async def main():
         print(f'Refresh token: {refresh[:40]}...')
         print(f'\nEncoded token (save this):')
         print(encoded)
-        print('\nSave encoded_token to config for future use.')
+
+        token_data = {
+            'encoded_token': encoded,
+            'access_token': access,
+            'refresh_token': refresh
+        }
+        with open('pikpak_token.db', 'w') as f:
+            json.dump(token_data, f)
+        print('\nToken saved to pikpak_token.db')
     else:
         print('Login failed.')
 

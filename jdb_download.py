@@ -2,17 +2,14 @@
 # coding=utf-8
 import asyncio
 import re
-import os
 import sys
 import time
 import random
-import subprocess
-import urllib.parse
 import shutil
 from pathlib import Path
 from datetime import datetime
-from functools import lru_cache
 
+import json
 import pandas as pd
 import pyperclip
 from bs4 import BeautifulSoup
@@ -23,17 +20,25 @@ from pikpakapi import PikPakApi
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QCheckBox, QGroupBox, QTextEdit,
-    QMessageBox, QComboBox, QSpinBox, QProgressBar, QTableWidget,
-    QTableWidgetItem, QHeaderView, QRadioButton, QFileDialog,
+    QComboBox, QSpinBox, QProgressBar, QTableWidget,
+    QTableWidgetItem, QRadioButton, QFileDialog,
 )
-from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtGui import QFont, QColor, QTextCursor
+from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QFont, QTextCursor
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 ARIA2_SERVER = 'http://192.168.50.7'
-PIKPAK_TOKEN = ''  # paste encoded_token from get_pikpak_token.py
-PIKPAK_TOKEN = 'eyJhY2Nlc3NfdG9rZW4iOiAiZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNklqRTNOakl5TmpjNExUQTBaR0V0TkRRMVlTMDVZbVkyTFdFNFpqSTJZV1ZpWXpObE9DSjkuZXlKcGMzTWlPaUpvZEhSd2N6b3ZMM1Z6WlhJdWJYbHdhV3R3WVdzdVkyOXRJaXdpYzNWaUlqb2lZVmRqT0ZONGVVNHlZVlpvUVhabWFDSXNJbUYxWkNJNklsbE9lRlE1ZHpkSFRXUlhka1ZQUzJFaUxDSmxlSEFpT2pFM056WTJOVGs0TVRrc0ltbGhkQ0k2TVRjM05qWTFNall4T1N3aVlYUmZhR0Z6YUNJNkluSXVRa2d0TlZkUVNrdFRSVFpJZDBWck4wTmtaVEZuVVNJc0luTmpiM0JsSWpvaWRYTmxjaUJ3WVc0Z2MzbHVZeUJ2Wm1ac2FXNWxJaXdpY0hKdmFtVmpkRjlwWkNJNklqSjNhM00xTm1Nek1XUmpPREJ6ZUcwMWNEa2lMQ0p0WlhSaElqcDdJbUVpT2lKTVMxTkJUMFYwYzJsRWNUZGliMFZXTVdFeFFUaG5SSFl6YkdKTE1HTnhNbVJpUlVKcE5IaEljVlpGUFNKOWZRLmV2VGhFcktKeWVhYnJkd29odC1ZN3BSUThCajBNZTRfT2RUcklKNjEtSDBEUjdDZDdIbzdvT1VxQ2pzd1QzZ05kdjRHY0RMZnI1d2pkTHM0NFFTMUVMQTVCMjBqTEROd0g1NC02d3JoT3JuZGJvOVdETTRxV2Z4b2tydjVTVHFJTWNLX0FSQmJsNjFOWmFVYlRHcXlVMjFCVTlwUC1jMXFXOFFBQWJNOVZ2U2ktV0hxOVNVdVZCZkdPV2dqQmJxVW5zZkpVOWxwcE9hVWxWLWFNOWlybmVQWTNlTkUyT3M0ZHU3cGdfV3VxT1RRdXgwSjRQbkxsZV81UjRoaGREYmkzaDc3ekV5RldLYXJLbDY5VXFfZXNVOFN4TlQ3aWhWTW5YTEFDbFhRemhGbHpFaG1MeExjRzNBSFMwVUJXdGl5eGN3OXo3U0xjRXJkaGZBZFRVdTRTUSIsICJyZWZyZXNoX3Rva2VuIjogIm9zLjVYdlB5SFFkdW1ubGtVc0QwQlpVYi1lZjVJRExrNjZVRVVnSWtnTThhN0ZTeThGR2JBR25zcFlMMXAxWSJ9'  # 貼上你的 encoded token
+
+PIKPAK_TOKEN = ''
+TOKEN_FILE = Path(__file__).parent / 'pikpak_token.db'
+if TOKEN_FILE.exists():
+    try:
+        with open(TOKEN_FILE, 'r', encoding='utf-8') as f:
+            token_data = json.load(f)
+            PIKPAK_TOKEN = token_data.get('encoded_token', '')
+    except Exception:
+        pass
 DELAYS = [10, 1, 3, 7, 2, 0.2, 18, 3, 6, 15, 5, 0.5, 0.1, 1, 6, 4, 2, 8, 12]
 VIDEO_EXTS = frozenset({'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v'})
 VIDEO_EXT_RE = re.compile(r'\.(MP4|MKV|AVI|MOV|WMV|FLV|WEBM|M4V|PRORES)$')
@@ -379,7 +384,7 @@ class JdbDownloader(QMainWindow):
         self.magnet_list: list[str] = []
 
         self.t_now    = pd.Timestamp.now()
-        self.t_h1year = self.t_now - pd.Timedelta(270, 'd')
+        self.t_h1year = self.t_now - pd.Timedelta(270, 'D')
 
         self._init_ui()
 
