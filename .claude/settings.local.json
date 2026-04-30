@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3)",
+      "Bash(powershell.exe -Command \"Start-Process 'C:\\\\\\\\Program Files\\\\\\\\Google\\\\\\\\Chrome\\\\\\\\Application\\\\\\\\chrome.exe' -ArgumentList '--remote-debugging-port=9222' -WindowStyle Minimized\")",
+      "Bash(timeout 15 python3 jdb_download.py)",
+      "Bash(python3 -m py_compile jdb_download.py)",
+      "Bash(python3 *)",
+      "Bash(pkill -f \"python.*jdb_download\")"
+    ]
+  }
+}

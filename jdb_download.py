@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # coding=utf-8
+import os
+import subprocess
 import asyncio
 import re
 import sys
 import time
 import random
 import shutil
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -84,7 +87,13 @@ RE_ID_PATTERNS   = [
 def get_json_path(filename: str, fallback_dir: str = 'c:/github/my_json') -> Path:
     local = Path(f'./{filename}')
     fallback = Path(f'{fallback_dir}/{filename}')
-    return local if local.exists() else (fallback if fallback.exists() else local)
+    if local.exists():
+        return local
+    elif fallback.exists():
+        return fallback
+    else:
+        # Return fallback path so user can see where it should be
+        return fallback
 
 MAGLINK_FN    = get_json_path('maglink_added.json')
 JAVDB_FN      = get_json_path('my javdb.json')
@@ -342,12 +351,16 @@ class JdbDownloader(QMainWindow):
                 print('PikPak token invalid')
 
         # DataFrames
-
-        # DataFrames
         self.df_maglink   = load_df(MAGLINK_FN)
         self.df_javdb     = load_df(JAVDB_FN)
         self.df_collection = load_df(COLLECTION_FN)
         self.df_check     = load_df(CHECK_FN, columns=['ID', 'check_date'])
+
+        # Log DataFrame loading status
+        print(f'[INIT] COLLECTION_FN: {COLLECTION_FN}')
+        print(f'[INIT] Collection DataFrame loaded: {not self.df_collection.empty} (rows: {len(self.df_collection)})')
+        if not self.df_collection.empty:
+            print(f'[INIT] Collection columns: {list(self.df_collection.columns)}')
 
         # Fast-lookup sets (kept in sync with DataFrames)
         self.downloaded_maglinks: set[str] = (
@@ -382,6 +395,7 @@ class JdbDownloader(QMainWindow):
         self.base_url            = 'https://javdb.com/censored'
         self.current_page_display = ''
         self.magnet_list: list[str] = []
+        self.local_files_list: list[dict] = []
 
         self.t_now    = pd.Timestamp.now()
         self.t_h1year = self.t_now - pd.Timedelta(270, 'D')
@@ -405,7 +419,7 @@ class JdbDownloader(QMainWindow):
         self.last_clip = ''
         self.clip_timer = QTimer(self)
         self.clip_timer.timeout.connect(self.check_clipboard)
-        self.clip_timer.start(500)
+        self.clip_timer.start(2000)
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
@@ -553,6 +567,9 @@ class JdbDownloader(QMainWindow):
         self.lbl_album_info.setStyleSheet('font-weight:bold;color:#0066cc;')
         main.addWidget(self.lbl_album_info)
 
+        # ── Tables layout ─────────────────────────────────────────────────────
+        tables_layout = QHBoxLayout()
+
         # ── Magnet table ──────────────────────────────────────────────────────
         self.table_album = QTableWidget()
         self.table_album.setColumnCount(6)
@@ -561,7 +578,20 @@ class JdbDownloader(QMainWindow):
         for col, w in enumerate([320, 70, 45, 45, 45, 85]):
             self.table_album.setColumnWidth(col, w)
         self.table_album.cellDoubleClicked.connect(self.on_table_double_click)
-        main.addWidget(self.table_album)
+        tables_layout.addWidget(self.table_album, 3)
+
+        # ── File Explore table ────────────────────────────────────────────────
+        self.table_files = QTableWidget()
+        self.table_files.setColumnCount(3)
+        self.table_files.setHorizontalHeaderLabels(['Filename', 'Size', 'Del'])
+        self.table_files.horizontalHeader().setStretchLastSection(False)
+        self.table_files.setColumnWidth(0, 300)
+        self.table_files.setColumnWidth(1, 80)
+        self.table_files.setColumnWidth(2, 40)
+        self.table_files.cellDoubleClicked.connect(self.on_file_double_click)
+        tables_layout.addWidget(self.table_files, 2)
+
+        main.addLayout(tables_layout)
 
         self.text_output = QTextEdit()
         self.text_output.setReadOnly(True)
@@ -574,6 +604,14 @@ class JdbDownloader(QMainWindow):
     # ── Logging ───────────────────────────────────────────────────────────────
 
     def log(self, msg: str) -> None:
+        """Thread-safe logging to the text_output widget."""
+        if threading.current_thread() is threading.main_thread():
+            self._do_log(msg)
+        else:
+            # Use default argument to capture the value, not the reference
+            QTimer.singleShot(0, lambda m=msg: self._do_log(m))
+
+    def _do_log(self, msg: str) -> None:
         if msg.startswith('<'):
             cursor = self.text_output.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -917,11 +955,197 @@ class JdbDownloader(QMainWindow):
                 asyncio.run(_run())
             threading.Thread(target=_thread, daemon=True).start()
 
+    def display_local_files(self, aid: str):
+        self.table_files.setRowCount(0)
+        self.local_files_list = []
+
+        self.log(f"[FILES] Loading files for {aid}...")
+
+        if self.df_collection.empty:
+            self.table_files.setRowCount(0)
+            self.log("[FILES] my collection.json is empty or not found - no local files to display")
+            self.log("[FILES] Tip: Create/populate my collection.json with album IDs and their local paths")
+            return
+
+        # Check required columns
+        if 'ID' not in self.df_collection.columns or 'path' not in self.df_collection.columns:
+            self.log(f"[FILES] ERROR: my collection.json missing required columns (ID, path)")
+            self.log(f"[FILES] Available columns: {list(self.df_collection.columns)}")
+            return
+
+        # Normalize ID for matching
+        aid_norm = aid.upper().strip().replace(' ', '-').replace('_', '-')
+        self.log(f"[FILES] Looking for album: {aid} (normalized: {aid_norm})")
+
+        mask = (self.df_collection['ID'].str.upper()
+                .str.strip()
+                .str.replace(' ', '-')
+                .str.replace('_', '-') == aid_norm)
+        rows = self.df_collection[mask]
+
+        if rows.empty:
+            self.log(f"[FILES] Album {aid_norm} not found in my collection.json")
+            self.log(f"[FILES] Total albums in collection: {len(self.df_collection)}")
+            return
+
+        self.log(f"[FILES] Found {len(rows)} matching row(s) for {aid_norm}")
+
+        # Try to find the first path that actually exists
+        valid_path = None
+        for idx, l_path in enumerate(rows['path'].values):
+            w_path = convert_linux_to_windows_path(l_path)
+            self.log(f"[FILES]   Path {idx+1}: Linux={l_path} -> Windows={w_path}")
+            if w_path:
+                if os.path.exists(w_path):
+                    valid_path = w_path
+                    self.log(f"[FILES]   ✓ Path exists: {w_path}")
+                    break
+                else:
+                    self.log(f"[FILES]   ✗ Path not found: {w_path}")
+
+        if not valid_path:
+            self.log(f"[FILES] No valid local directory found for {aid_norm}")
+            return
+
+        # Scan files directly (synchronously) - no need for threading since it's fast
+        self.log(f"[FILES] Scanning directory: {valid_path[:60]}...")
+        try:
+            files_data = []
+            items = os.listdir(valid_path)
+            self.log(f"[FILES] Found {len(items)} items in directory")
+
+            for item_name in items:
+                try:
+                    item_path = os.path.join(valid_path, item_name)
+
+                    # Check if it's a file
+                    if not os.path.isfile(item_path):
+                        continue
+
+                    # Check if it's a video file
+                    name_lower = item_name.lower()
+                    if any(name_lower.endswith(ext) for ext in VIDEO_EXTS):
+                        try:
+                            size = os.path.getsize(item_path)
+                            files_data.append({'name': item_name, 'size': size, 'path': item_path})
+                            self.log(f"[FILES]   ✓ {item_name[:45]} ({size / (1024*1024*1024):.2f} GB)")
+                        except Exception as e:
+                            self.log(f"[FILES]   ⚠ Can't read size: {e}")
+                            files_data.append({'name': item_name, 'size': 0, 'path': item_path})
+                except Exception as item_err:
+                    self.log(f"[FILES]   ⚠ Error: {item_err}")
+                    continue
+
+            files_data.sort(key=lambda x: x['size'], reverse=True)
+            self.log(f"[FILES] ✓ Scan complete: {len(files_data)} video file(s) found")
+
+            # Update UI directly (synchronously)
+            self._update_files_table(files_data, aid)
+
+        except Exception as e:
+            self.log(f"[FILES] ❌ Error scanning directory: {type(e).__name__}: {e}")
+            self._update_files_table([], aid)
+
+    def _update_files_table(self, files_data, aid):
+        try:
+            self.log(f"[FILES] _update_files_table called for {aid} with {len(files_data)} files")
+
+            # Always clear the table first
+            self.table_files.setRowCount(0)
+            self.local_files_list = []
+
+            if not files_data:
+                self.log(f'[FILES] No video files found in the album folder for {aid}')
+                # Show "No files" message in table
+                self.table_files.insertRow(0)
+                no_files_item = QTableWidgetItem(f'No video files found for {aid}')
+                self.table_files.setItem(0, 0, no_files_item)
+                return
+
+            self.log(f"[FILES] Adding {len(files_data)} rows to table")
+
+            for idx, fd in enumerate(files_data):
+                try:
+                    row_idx = self.table_files.rowCount()
+                    self.table_files.insertRow(row_idx)
+                    self.log(f"[FILES]   Row {row_idx}: {fd.get('name', 'unknown')[:30]}")
+
+                    # Filename
+                    name_item = QTableWidgetItem(str(fd['name']))
+                    self.table_files.setItem(row_idx, 0, name_item)
+
+                    # Size
+                    size_gb = fd['size'] / (1024*1024*1024)
+                    size_str = f"{size_gb:.2f} GB" if size_gb >= 1 else f"{fd['size'] / (1024*1024):.2f} MB"
+                    self.table_files.setItem(row_idx, 1, QTableWidgetItem(size_str))
+
+                    # Delete icon
+                    del_item = QTableWidgetItem('🗑')
+                    self.table_files.setItem(row_idx, 2, del_item)
+
+                    self.local_files_list.append(fd)
+                except Exception as row_err:
+                    self.log(f"[FILES] Error adding row {idx}: {row_err}")
+                    continue
+
+            self.log(f'[FILES] ✓ Successfully displayed {len(self.local_files_list)} file(s) in table')
+        except Exception as e:
+            self.log(f"[FILES] ERROR updating UI table for {aid}: {type(e).__name__}: {e}")
+            import traceback
+            self.log(f"[FILES] Traceback: {traceback.format_exc()}")
+            # Show error in table
+            self.table_files.setRowCount(0)
+            self.table_files.insertRow(0)
+            error_item = QTableWidgetItem(f'Error loading files: {str(e)[:40]}')
+            self.table_files.setItem(0, 0, error_item)
+
+    def on_file_double_click(self, row, col):
+        if row >= len(self.local_files_list):
+            return
+        
+        file_info = self.local_files_list[row]
+        if col == 2: # Delete column
+            self.delete_file(row)
+        else:
+            # Play with VLC
+            vlc_paths = [
+                r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+                r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
+            ]
+            vlc_exe = None
+            for p in vlc_paths:
+                if os.path.exists(p):
+                    vlc_exe = p
+                    break
+            
+            try:
+                if vlc_exe:
+                    # Use absolute path and ensure it's quoted if needed by Popen
+                    subprocess.Popen([vlc_exe, file_info['path']])
+                    self.log(f'[VLC] Playing: {file_info["name"]}')
+                else:
+                    # Fallback to system default player
+                    os.startfile(file_info['path'])
+                    self.log(f'[OPEN] Playing with default player: {file_info["name"]}')
+            except Exception as e:
+                self.log(f'[PLAY] Error: {e}')
+
+    def delete_file(self, row):
+        file_info = self.local_files_list[row]
+        try:
+            os.remove(file_info['path'])
+            self.log(f'[DELETE] File deleted: {file_info["name"]}')
+            self.table_files.removeRow(row)
+            self.local_files_list.pop(row)
+        except Exception as e:
+            self.log(f'[DELETE] Error: {e}')
+
     # ── Scan state management ─────────────────────────────────────────────────
 
     def pause_current(self):
         self.paused_album = self.current_album
         self.log(f'Paused: {self.current_album.aid}')
+        self.display_local_files(self.current_album.aid)
 
     def continue_scan(self):
         if self.paused_album:
@@ -949,7 +1173,12 @@ class JdbDownloader(QMainWindow):
     def is_recently_checked(self, aid: str) -> bool:
         if self.df_check.empty or 'ID' not in self.df_check.columns:
             return False
-        rows = self.df_check[self.df_check['ID'].str.upper() == aid.upper()]
+        aid_norm = aid.upper().strip().replace(' ', '-').replace('_', '-')
+        mask = (self.df_check['ID'].str.upper()
+                .str.strip()
+                .str.replace(' ', '-')
+                .str.replace('_', '-') == aid_norm)
+        rows = self.df_check[mask]
         if rows.empty:
             return False
         try:
@@ -1062,13 +1291,19 @@ class JdbDownloader(QMainWindow):
         self.check_collection_and_open_browser(aid)
         self.display_album_info()
         self.lbl_status.setText(f'Album: {aid}')
+        self.display_local_files(aid)
 
     # ── Collection helper ─────────────────────────────────────────────────────
 
     def check_collection_and_open_browser(self, aid: str):
         if self.df_collection.empty or 'ID' not in self.df_collection.columns:
             return
-        row = self.df_collection[self.df_collection['ID'].str.upper() == aid.upper()]
+        aid_norm = aid.upper().strip().replace(' ', '-').replace('_', '-')
+        mask = (self.df_collection['ID'].str.upper()
+                .str.strip()
+                .str.replace(' ', '-')
+                .str.replace('_', '-') == aid_norm)
+        row = self.df_collection[mask]
         if not row.empty:
             self.log(f'[COLLECTION] {aid} already in collection — skip opening browser')
             return
