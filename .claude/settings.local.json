@@ -6,7 +6,10 @@
       "Bash(timeout 15 python3 jdb_download.py)",
       "Bash(python3 -m py_compile jdb_download.py)",
       "Bash(python3 *)",
-      "Bash(pkill -f \"python.*jdb_download\")"
+      "Bash(pkill -f \"python.*jdb_download\")",
+      "WebFetch(domain:javdb.com)",
+      "Bash(pip show *)",
+      "Bash(python *)"
     ]
   }
 }

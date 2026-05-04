@@ -347,8 +347,16 @@ class JdbDownloader(QMainWindow):
         if PIKPAK_TOKEN:
             try:
                 self.pikpak = PikPakApi(encoded_token=PIKPAK_TOKEN)
-            except Exception:
-                print('PikPak token invalid')
+                self.log('[INIT] PikPak token loaded')
+            except Exception as e:
+                error_msg = str(e)
+                if 'token' in error_msg.lower():
+                    print(f'❌ PikPak TOKEN ERROR: {error_msg}')
+                    print('Please regenerate the token using get_pikpak_token.py')
+                else:
+                    print(f'❌ PikPak initialization error: {error_msg}')
+        else:
+            self.log('[INIT] PikPak token not found (pikpak_token.db)')
 
         # DataFrames
         self.df_maglink   = load_df(MAGLINK_FN)
@@ -941,19 +949,7 @@ class JdbDownloader(QMainWindow):
                 self.log('[DL] PikPak token not configured')
                 return
             self.log(f'[DL] Sending to PikPak...')
-            import threading
-            def _thread():
-                async def _run():
-                    try:
-                        await self.pikpak.refresh_access_token()
-                        result = await self.pikpak.offline_download(file_url=mag)
-                        task = result.get('task', {})
-                        tid = task.get('id', 'unknown')
-                        self.log(f'[DL] PikPak task added: {tid}')
-                    except Exception as e:
-                        self.log(f'[DL] PikPak error: {e}')
-                asyncio.run(_run())
-            threading.Thread(target=_thread, daemon=True).start()
+            self._pikpak_download(mag)
 
     def display_local_files(self, aid: str):
         self.table_files.setRowCount(0)
@@ -1341,7 +1337,11 @@ class JdbDownloader(QMainWindow):
                     self.log(f'[Clipboard] Album {self.current_album.aid} added to memory')
 
             if dest == 'pikpak':
-                self.log('[Clipboard] PikPak mode — magnet kept in clipboard, aria2 skipped')
+                if not self.pikpak:
+                    self.log('[Clipboard] PikPak token not configured')
+                else:
+                    self.log('[Clipboard] Sending to PikPak...')
+                    self._pikpak_download(mag_clean)
             elif dest == 'aria2':
                 if self.aria2:
                     try:
@@ -1405,6 +1405,51 @@ class JdbDownloader(QMainWindow):
         self.downloaded_maglinks.add(mag_clean)
         save_df(self.df_maglink, MAGLINK_FN)
         self.log('[Clipboard] Magnet saved')
+
+    def _pikpak_download(self, link: str):
+        """Send magnet or URL to PikPak for download."""
+        import threading
+        def _thread():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self._pikpak_async(link))
+            except Exception as e:
+                self.log(f'[DL] PikPak thread error: {str(e)[:300]}')
+            finally:
+                loop.close()
+        threading.Thread(target=_thread, daemon=True).start()
+
+    async def _pikpak_async(self, link: str):
+        """Async PikPak download handler."""
+        try:
+            self.log(f'[DL] Refreshing PikPak token...')
+            await self.pikpak.refresh_access_token()
+            self.log(f'[DL] Token refreshed, sending to PikPak...')
+
+            result = await self.pikpak.offline_download(file_url=link)
+
+            self.log(f'[DL] PikPak response received')
+            task = result.get('task', {})
+            tid = task.get('id', 'unknown')
+            self.log(f'[DL] PikPak task added: {tid}')
+        except Exception as e:
+            import traceback
+            error_msg = str(e)
+
+            # Check for token-related errors
+            if 'token' in error_msg.lower() or 'unauthorized' in error_msg.lower() or 'auth' in error_msg.lower():
+                self.log(f'[DL] ❌ PikPak TOKEN ERROR: {error_msg[:200]}')
+                self.log(f'[DL] Please check: pikpak_token.db file or regenerate the token')
+            elif '401' in error_msg or '403' in error_msg:
+                self.log(f'[DL] ❌ PikPak AUTHENTICATION FAILED: {error_msg[:200]}')
+                self.log(f'[DL] Token may have expired. Please regenerate it.')
+            else:
+                self.log(f'[DL] ❌ PikPak error: {error_msg[:300]}')
+
+            tb = traceback.format_exc()[:500]
+            if tb and 'token' in tb.lower():
+                self.log(f'[DL] Token-related traceback: {tb}')
 
     # ── Download ──────────────────────────────────────────────────────────────
 
