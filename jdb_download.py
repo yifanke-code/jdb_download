@@ -15,7 +15,6 @@ from datetime import datetime
 import json
 import pandas as pd
 import pyperclip
-from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import aria2p
 from pikpakapi import PikPakApi
@@ -76,6 +75,7 @@ RE_SECURITY      = re.compile(
 )
 RE_MAGNET        = re.compile(r'magnet:\?[^\s\n]+')
 RE_JAVDB_ALBUM   = re.compile(r'https://javdb\.com/v/[0-9A-Za-z]+')
+RE_ITEM_DIV      = re.compile(r'<div\s+class="item\s+[^"]*">([\s\S]*?)(?=<div\s+class="item|$)', re.DOTALL)
 RE_ID_PATTERNS   = [
     re.compile(r'([A-Z]{2,5}[-\s]?\d{3,5})'),
     re.compile(r'([A-Z]{1,2}\d{2,5})'),
@@ -162,23 +162,24 @@ def parse_album_page(source: str) -> dict:
     }
 
 def parse_magnet_items(source: str) -> list[tuple]:
-    """Extract magnet links and metadata from page source."""
-    soup = BeautifulSoup(source, 'html.parser')
+    """Extract magnet links and metadata from page source using regex."""
     results = []
-    for item in soup.find_all('div', class_='item'):
-        btn = item.find('button', {'data-clipboard-text': True})
-        if not btn:
-            continue
-        mag  = btn['data-clipboard-text']
-        name = item.find('span', class_='name')
-        meta = item.find('span', class_='meta')
-        ts   = item.find('span', class_='time')
-        results.append((
-            mag,
-            name.get_text(strip=True) if name else '',
-            meta.get_text(strip=True) if meta else '',
-            ts.get_text(strip=True)   if ts   else '',
-        ))
+    for item_match in RE_ITEM_DIV.finditer(source):
+        item_html = item_match.group(1)
+
+        name_match = re.search(r'<span\s+class="name">([^<]+)</span>', item_html)
+        meta_match = re.search(r'<span\s+class="meta">\s*([^<]+)\s*</span>', item_html)
+        mag_match = re.search(r'<button[^>]*data-clipboard-text="([^"]+)"', item_html)
+        time_match = re.search(r'<span\s+class="time">([^<]+)</span>', item_html)
+
+        if mag_match:
+            name = name_match.group(1).strip() if name_match else ''
+            meta = meta_match.group(1).strip() if meta_match else ''
+            mag = mag_match.group(1).strip()
+            ts = time_match.group(1).strip() if time_match else ''
+
+            results.append((mag, name, meta, ts))
+
     return results
 
 def extract_id_from_filename(filename: str) -> str | None:
@@ -1220,9 +1221,12 @@ class JdbDownloader(QMainWindow):
                     links = self.page.query_selector_all('a[href*="/v/"]')
                     if links:
                         href = links[0].get_attribute('href')
-                        self.log(f'Found link, clicking: {href}')
-                        links[0].click()
-                        self.page.wait_for_timeout(1000)
+                        if not href.startswith('http'):
+                            href = 'https://javdb.com' + href
+                        self.log(f'Found link, navigating to: {href}')
+                        if not safe_goto(self.page, href):
+                            self.log('Failed to navigate to album')
+                            return
                     else:
                         self.log('No album link found')
                         return
