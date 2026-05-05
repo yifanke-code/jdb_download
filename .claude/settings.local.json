@@ -9,7 +9,9 @@
       "Bash(pkill -f \"python.*jdb_download\")",
       "WebFetch(domain:javdb.com)",
       "Bash(pip show *)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }
