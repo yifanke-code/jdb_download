@@ -491,7 +491,7 @@ class JdbDownloader(QMainWindow):
         self.line_album_link.setPlaceholderText('https://javdb.com/v/xxx')
         self.btn_go_album = QPushButton('Go to Album')
         self.btn_go_album.clicked.connect(self.go_to_album)
-        dll.addWidget(QLabel('Link:'))
+        dll.addWidget(QLabel('Link/ID:'))
         dll.addWidget(self.line_album_link)
         dll.addWidget(self.btn_go_album)
         dlg.setLayout(dll)
@@ -1212,16 +1212,38 @@ class JdbDownloader(QMainWindow):
         link = self.line_album_link.text().strip()
 
         if link:
-            if not link.startswith('http'):
-                link = 'https://javdb.com/v/' + link
-            self.log(f'Loading album: {link}')
-            try:
+            if link.startswith('http'):
+                self.log(f'Loading album: {link}')
                 if not safe_goto(self.page, link):
                     self.log('Failed to load album')
                     return
-            except Exception as e:
-                self.log(f'Error loading album: {e}')
-                return
+            else:
+                # Search for ID
+                search_url = f"https://javdb.com/search?q={link}&f=all"
+                self.log(f'Searching for ID {link}: {search_url}')
+                if not safe_goto(self.page, search_url):
+                    self.log('Failed to reach search page')
+                    return
+                
+                try:
+                    self.page.wait_for_load_state('domcontentloaded', timeout=5000)
+                    time.sleep(1) 
+                    # Find first album link in search results
+                    first_album = self.page.query_selector('.movie-list .item a, .video-list .item a, a[href^="/v/"]')
+                    if first_album:
+                        href = first_album.get_attribute('href')
+                        if not href.startswith('http'):
+                            href = 'https://javdb.com' + href
+                        self.log(f'Found first search result, navigating to: {href}')
+                        if not safe_goto(self.page, href):
+                            self.log('Failed to navigate to search result')
+                            return
+                    else:
+                        self.log(f'No search results found for ID: {link}')
+                        return
+                except Exception as e:
+                    self.log(f'Error during search: {e}')
+                    return
         else:
             # If no link provided, check if current page is already an album
             try:
