@@ -15,6 +15,7 @@ from datetime import datetime
 import json
 import pandas as pd
 import pyperclip
+import signal
 from playwright.sync_api import sync_playwright
 import aria2p
 from pikpakapi import PikPakApi
@@ -1199,6 +1200,15 @@ class JdbDownloader(QMainWindow):
         if not self.browser:
             self.log('Browser not connected')
             return
+        
+        # Ensure we have the latest page reference
+        try:
+            ctx = self.browser.contexts[0] if self.browser and self.browser.contexts else None
+            if ctx and ctx.pages:
+                self.page = ctx.pages[0]
+        except Exception:
+            pass
+
         link = self.line_album_link.text().strip()
 
         if link:
@@ -1213,11 +1223,16 @@ class JdbDownloader(QMainWindow):
                 self.log(f'Error loading album: {e}')
                 return
         else:
-            self.log('No album link, trying to find on current page')
+            # If no link provided, check if current page is already an album
             try:
-                ctx = self.browser.contexts[0] if self.browser and self.browser.contexts else None
-                if ctx and ctx.pages:
-                    self.page = ctx.pages[0]
+                cur_url = str(self.page.url)
+                if '/v/' in cur_url:
+                    self.log('Current page is already an album page, parsing current page...')
+                else:
+                    self.log('No album link, trying to find first album link on current page')
+                    self.page.wait_for_load_state('domcontentloaded', timeout=5000)
+                    # Use a small delay to let execution context stabilize
+                    time.sleep(0.5)
                     links = self.page.query_selector_all('a[href*="/v/"]')
                     if links:
                         href = links[0].get_attribute('href')
@@ -1231,30 +1246,46 @@ class JdbDownloader(QMainWindow):
                         self.log('No album link found')
                         return
             except Exception as e:
-                self.log(f'Error: {e}')
+                self.log(f'Error identifying album page: {e}')
                 return
 
         source = ''
         for attempt in range(5):
             try:
+                # Refresh page object in each attempt to avoid stale references
                 ctx = self.browser.contexts[0] if self.browser and self.browser.contexts else None
                 if ctx and ctx.pages:
                     self.page = ctx.pages[0]
+                
+                self.page.wait_for_load_state('domcontentloaded', timeout=5000)
                 cur_url = str(self.page.url)
-                if not cur_url or '/v/' not in cur_url:
+                if '/v/' not in cur_url:
+                    if attempt < 4:
+                        time.sleep(1)
+                        continue
                     self.log(f'Current page is not an album page: {cur_url}')
                     return
-                self.page.wait_for_load_state('domcontentloaded', timeout=5000)
-                time.sleep(0.5)
+
                 source = self.page.content()
                 if source and len(source) > 100:
-                    break
+                    # Check if magnets are actually there, if not, wait a bit more
+                    if 'magnet:' in source:
+                        break
+                    elif attempt < 4:
+                        self.log(f'Waiting for magnets to load (attempt {attempt+1}/5)...')
+                        time.sleep(1.5)
+                        continue
+                    else:
+                        break
             except Exception as e:
-                if attempt < 4:
-                    time.sleep(1)
-                    continue
-                self.log(f'Failed to retrieve page content: {e}')
-                return
+                if 'context was destroyed' in str(e) or 'navigation' in str(e):
+                    if attempt < 4:
+                        time.sleep(1)
+                        continue
+                self.log(f'Attempt {attempt+1} failed: {e}')
+                if attempt == 4:
+                    return
+                time.sleep(1)
 
         if not source or len(source) < 100:
             self.log('Failed to retrieve page content')
@@ -1429,7 +1460,8 @@ class JdbDownloader(QMainWindow):
         try:
             self.log(f'[DL] Refreshing PikPak token...')
             await self.pikpak.refresh_access_token()
-            self.log(f'[DL] Token refreshed, sending to PikPak...')
+            self.save_pikpak_token()
+            self.log(f'[DL] Token refreshed and saved, sending to PikPak...')
 
             result = await self.pikpak.offline_download(file_url=link)
 
@@ -1483,6 +1515,30 @@ class JdbDownloader(QMainWindow):
         self.log('Magnet(s) saved to maglink_added.json')
 
     # ── Memory / persistence ──────────────────────────────────────────────────
+
+    def save_pikpak_token(self):
+        """Save the current PikPak token state to pikpak_token.db."""
+        if not self.pikpak:
+            return
+        try:
+            # Re-read existing file to preserve other fields if any
+            token_data = {}
+            if TOKEN_FILE.exists():
+                try:
+                    with open(TOKEN_FILE, 'r', encoding='utf-8') as f:
+                        token_data = json.load(f)
+                except Exception:
+                    pass
+            
+            token_data['encoded_token'] = self.pikpak.encoded_token
+            token_data['access_token']  = self.pikpak.access_token
+            token_data['refresh_token'] = self.pikpak.refresh_token
+            
+            with open(TOKEN_FILE, 'w', encoding='utf-8') as f:
+                json.dump(token_data, f, indent=4)
+            # self.log('[SAVE] PikPak token updated in pikpak_token.db') # Too noisy if logged on every download
+        except Exception as e:
+            self.log(f'[ERROR] Failed to save PikPak token: {e}')
 
     def add_album_to_memory(self, album: AlbumInfo):
         if not album:
@@ -1676,8 +1732,21 @@ class JdbDownloader(QMainWindow):
     # ── Qt close ──────────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        self.log('[EXIT] Closing application...')
         save_df(self.df_maglink, MAGLINK_FN)
         save_df(self.df_javdb,   JAVDB_FN)
+        
+        # Save PikPak token and close client
+        if self.pikpak:
+            self.save_pikpak_token()
+            try:
+                # Close the httpx client asynchronously in a temporary loop
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(self.pikpak.httpx_client.aclose())
+                loop.close()
+            except Exception as e:
+                print(f'Error closing PikPak client: {e}')
+
         if self.playwright:
             try:
                 self.playwright.stop()
@@ -1691,6 +1760,15 @@ class JdbDownloader(QMainWindow):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     win = JdbDownloader()
+    
+    # Handle Ctrl+C and other termination signals
+    def signal_handler(sig, frame):
+        print(f'\nSignal {sig} received, shutting down...')
+        QTimer.singleShot(0, win.close)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     win.show()
     win._init_browser()
     win._init_clipboard_timer()
