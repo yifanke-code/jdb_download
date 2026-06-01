@@ -393,6 +393,7 @@ class JdbDownloader(QMainWindow):
             set(self.df_check['ID'].tolist())
             if not self.df_check.empty and 'ID' in self.df_check.columns else set()
         )
+        self.saved_ids_this_session: set[str] = set()
 
         # Scan state
         self.current_page        = 1
@@ -862,7 +863,6 @@ class JdbDownloader(QMainWindow):
     # ── Album display ─────────────────────────────────────────────────────────
 
     def display_album_info(self):
-        self.table_album.setRowCount(0)
         self.magnet_list = []
 
         def parse_size_mb(s: str) -> float:
@@ -898,12 +898,13 @@ class JdbDownloader(QMainWindow):
             x['date'],
         ))
 
-        for md in mag_data:
-            row = self.table_album.rowCount()
-            self.table_album.insertRow(row)
+        self.table_album.setUpdatesEnabled(False)
+        self.table_album.setRowCount(len(mag_data))
+        for row, md in enumerate(mag_data):
             for col, val in enumerate([md['title'][:50], md['size'], md['hd'], md['subtitle'], md['cracked'], md['date']]):
                 self.table_album.setItem(row, col, QTableWidgetItem(val))
             self.magnet_list.append(md['mag'])
+        self.table_album.setUpdatesEnabled(True)
 
         actors_str = ''
         if self.current_album.actors:
@@ -926,15 +927,14 @@ class JdbDownloader(QMainWindow):
         album = self.current_album
         if not album:
             return
-        if album.aid.upper() not in self.id_list:
+
+        aid_upper = album.aid.upper()
+        if aid_upper not in self.saved_ids_this_session:
             self.add_album_to_memory(album)
-            self._page_unsaved_count += 1
-            if self._page_unsaved_count >= 4:
-                self.save_javdb_to_file()
-                self._page_unsaved_count = 0
-            self.log(f'[PAGE] {album.aid} saved to my javdb.json ({self._page_unsaved_count}/4)')
-        else:
-            self.log(f'[PAGE] {album.aid} already in my javdb.json')
+            self.save_javdb_to_file()
+            # self.saved_ids_this_session is updated inside add_album_to_memory
+            self.log(f'[PAGE] {album.aid} updated/saved to my javdb.json')
+        
         mag = self.magnet_list[row]
         dest = self.combo_dest.currentText()
         if dest == 'aria2':
@@ -1220,21 +1220,19 @@ class JdbDownloader(QMainWindow):
             else:
                 # Search for ID
                 search_url = f"https://javdb.com/search?q={link}&f=all"
-                self.log(f'Searching for ID {link}: {search_url}')
+                self.log(f'Searching for ID {link}')
                 if not safe_goto(self.page, search_url):
                     self.log('Failed to reach search page')
                     return
-                
+
                 try:
                     self.page.wait_for_load_state('domcontentloaded', timeout=5000)
-                    time.sleep(1) 
-                    # Find first album link in search results
                     first_album = self.page.query_selector('.movie-list .item a, .video-list .item a, a[href^="/v/"]')
                     if first_album:
                         href = first_album.get_attribute('href')
                         if not href.startswith('http'):
                             href = 'https://javdb.com' + href
-                        self.log(f'Found first search result, navigating to: {href}')
+                        self.log(f'Found search result, loading album...')
                         if not safe_goto(self.page, href):
                             self.log('Failed to navigate to search result')
                             return
@@ -1248,19 +1246,15 @@ class JdbDownloader(QMainWindow):
             # If no link provided, check if current page is already an album
             try:
                 cur_url = str(self.page.url)
-                if '/v/' in cur_url:
-                    self.log('Current page is already an album page, parsing current page...')
-                else:
-                    self.log('No album link, trying to find first album link on current page')
+                if '/v/' not in cur_url:
+                    self.log('No album link provided, finding first album...')
                     self.page.wait_for_load_state('domcontentloaded', timeout=5000)
-                    # Use a small delay to let execution context stabilize
-                    time.sleep(0.5)
                     links = self.page.query_selector_all('a[href*="/v/"]')
                     if links:
                         href = links[0].get_attribute('href')
                         if not href.startswith('http'):
                             href = 'https://javdb.com' + href
-                        self.log(f'Found link, navigating to: {href}')
+                        self.log(f'Loading album...')
                         if not safe_goto(self.page, href):
                             self.log('Failed to navigate to album')
                             return
@@ -1272,42 +1266,37 @@ class JdbDownloader(QMainWindow):
                 return
 
         source = ''
-        for attempt in range(5):
+        for attempt in range(3):
             try:
                 # Refresh page object in each attempt to avoid stale references
                 ctx = self.browser.contexts[0] if self.browser and self.browser.contexts else None
                 if ctx and ctx.pages:
                     self.page = ctx.pages[0]
-                
+
                 self.page.wait_for_load_state('domcontentloaded', timeout=5000)
                 cur_url = str(self.page.url)
                 if '/v/' not in cur_url:
-                    if attempt < 4:
-                        time.sleep(1)
+                    if attempt < 2:
+                        time.sleep(0.2)
                         continue
                     self.log(f'Current page is not an album page: {cur_url}')
                     return
 
                 source = self.page.content()
-                if source and len(source) > 100:
-                    # Check if magnets are actually there, if not, wait a bit more
-                    if 'magnet:' in source:
-                        break
-                    elif attempt < 4:
-                        self.log(f'Waiting for magnets to load (attempt {attempt+1}/5)...')
-                        time.sleep(1.5)
-                        continue
-                    else:
-                        break
+                if source and len(source) > 100 and 'magnet:' in source:
+                    break
+                elif attempt < 2:
+                    time.sleep(0.3)
+                    continue
             except Exception as e:
                 if 'context was destroyed' in str(e) or 'navigation' in str(e):
-                    if attempt < 4:
-                        time.sleep(1)
+                    if attempt < 2:
+                        time.sleep(0.2)
                         continue
                 self.log(f'Attempt {attempt+1} failed: {e}')
-                if attempt == 4:
+                if attempt == 2:
                     return
-                time.sleep(1)
+                time.sleep(0.2)
 
         if not source or len(source) < 100:
             self.log('Failed to retrieve page content')
@@ -1620,6 +1609,7 @@ class JdbDownloader(QMainWindow):
         cleaned_aid = aid.strip().upper()
         self.id_list.discard(cleaned_aid)
         self.id_list.add(cleaned_aid)
+        self.saved_ids_this_session.add(cleaned_aid)
         self.log(f'[ADDED] {aid} | title: {album.title[:30] if album.title else "(empty)"} to memory')
 
     def save_javdb_to_file(self):
