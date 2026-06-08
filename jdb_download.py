@@ -163,23 +163,25 @@ def parse_album_page(source: str) -> dict:
     }
 
 def parse_magnet_items(source: str) -> list[tuple]:
-    """Extract magnet links and metadata from page source using regex."""
+    """Extract magnet links and metadata from page source using BeautifulSoup."""
+    from bs4 import BeautifulSoup
     results = []
-    for item_match in RE_ITEM_DIV.finditer(source):
-        item_html = item_match.group(1)
+    soup = BeautifulSoup(source, 'html.parser')
 
-        name_match = re.search(r'<span\s+class="name">([^<]+)</span>', item_html)
-        meta_match = re.search(r'<span\s+class="meta">\s*([^<]+)\s*</span>', item_html)
-        mag_match = re.search(r'<button[^>]*data-clipboard-text="([^"]+)"', item_html)
-        time_match = re.search(r'<span\s+class="time">([^<]+)</span>', item_html)
+    for item_div in soup.find_all('div', class_='item'):
+        name_span = item_div.find('span', class_='name')
+        meta_span = item_div.find('span', class_='meta')
+        mag_button = item_div.find('button', attrs={'data-clipboard-text': True})
+        time_span = item_div.find('span', class_='time')
 
-        if mag_match:
-            name = name_match.group(1).strip() if name_match else ''
-            meta = meta_match.group(1).strip() if meta_match else ''
-            mag = mag_match.group(1).strip()
-            ts = time_match.group(1).strip() if time_match else ''
+        if mag_button:
+            name = name_span.get_text(strip=True) if name_span else ''
+            meta = meta_span.get_text(strip=True) if meta_span else ''
+            mag = mag_button.get('data-clipboard-text', '').strip()
+            ts = time_span.get_text(strip=True) if time_span else ''
 
-            results.append((mag, name, meta, ts))
+            if mag:
+                results.append((mag, name, meta, ts))
 
     return results
 
