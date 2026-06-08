@@ -494,9 +494,12 @@ class JdbDownloader(QMainWindow):
         self.line_album_link.setPlaceholderText('https://javdb.com/v/xxx')
         self.btn_go_album = QPushButton('Go to Album')
         self.btn_go_album.clicked.connect(self.go_to_album)
+        self.btn_clear_go_album = QPushButton('Clear & Go to Album')
+        self.btn_clear_go_album.clicked.connect(self.clear_and_go_to_album)
         dll.addWidget(QLabel('Link/ID:'))
         dll.addWidget(self.line_album_link)
         dll.addWidget(self.btn_go_album)
+        dll.addWidget(self.btn_clear_go_album)
         dlg.setLayout(dll)
 
         # Local scan
@@ -595,12 +598,13 @@ class JdbDownloader(QMainWindow):
 
         # ── File Explore table ────────────────────────────────────────────────
         self.table_files = QTableWidget()
-        self.table_files.setColumnCount(3)
-        self.table_files.setHorizontalHeaderLabels(['Filename', 'Size', 'Del'])
+        self.table_files.setColumnCount(4)
+        self.table_files.setHorizontalHeaderLabels(['Filename', 'Size', 'Del', 'Folder'])
         self.table_files.horizontalHeader().setStretchLastSection(False)
         self.table_files.setColumnWidth(0, 300)
         self.table_files.setColumnWidth(1, 80)
         self.table_files.setColumnWidth(2, 40)
+        self.table_files.setColumnWidth(3, 50)
         self.table_files.cellDoubleClicked.connect(self.on_file_double_click)
         tables_layout.addWidget(self.table_files, 2)
 
@@ -1083,6 +1087,10 @@ class JdbDownloader(QMainWindow):
                     del_item = QTableWidgetItem('🗑')
                     self.table_files.setItem(row_idx, 2, del_item)
 
+                    # Folder icon
+                    folder_item = QTableWidgetItem('📁')
+                    self.table_files.setItem(row_idx, 3, folder_item)
+
                     self.local_files_list.append(fd)
                 except Exception as row_err:
                     self.log(f"[FILES] Error adding row {idx}: {row_err}")
@@ -1102,10 +1110,12 @@ class JdbDownloader(QMainWindow):
     def on_file_double_click(self, row, col):
         if row >= len(self.local_files_list):
             return
-        
+
         file_info = self.local_files_list[row]
         if col == 2: # Delete column
             self.delete_file(row)
+        elif col == 3: # Folder column
+            self.open_file_folder(file_info['path'])
         else:
             # Play with VLC
             vlc_paths = [
@@ -1117,7 +1127,7 @@ class JdbDownloader(QMainWindow):
                 if os.path.exists(p):
                     vlc_exe = p
                     break
-            
+
             try:
                 if vlc_exe:
                     # Use absolute path and ensure it's quoted if needed by Popen
@@ -1139,6 +1149,14 @@ class JdbDownloader(QMainWindow):
             self.local_files_list.pop(row)
         except Exception as e:
             self.log(f'[DELETE] Error: {e}')
+
+    def open_file_folder(self, file_path):
+        try:
+            folder_path = os.path.dirname(file_path)
+            subprocess.Popen(['explorer.exe', '/select,', file_path])
+            self.log(f'[FOLDER] Opened folder: {folder_path}')
+        except Exception as e:
+            self.log(f'[FOLDER] Error opening folder: {e}')
 
     # ── Scan state management ─────────────────────────────────────────────────
 
@@ -1336,6 +1354,10 @@ class JdbDownloader(QMainWindow):
         self.display_album_info()
         self.lbl_status.setText(f'Album: {aid}')
         self.display_local_files(aid)
+
+    def clear_and_go_to_album(self):
+        self.line_album_link.clear()
+        self.go_to_album()
 
     # ── Collection helper ─────────────────────────────────────────────────────
 
